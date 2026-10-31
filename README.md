@@ -72,6 +72,7 @@ Start-ScheduledTask -TaskPath '\FantasyModel\' -TaskName daily     # test
 | `pre_waiver` | Tue 8pm | rosters, FAAB left per team, last 2 wks scores, projections wk..wk+4 | pool + budgets at bid time = model inputs |
 | `post_waiver` | Wed 9am | transactions + winning bids, post-claim rosters | labels + next week's starting state |
 | `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections + status | late projection moves = variance signal |
+| `history` | Tue 10am | current-season nflverse stats/snaps/schedules | re-fetchable; kept fresh for Week B |
 
 `daily` skips Thu/Sun because `pre_kickoff` pulls players then → stays inside Sleeper's
 one-call-per-day on `/players/nfl`. **Check each league's waiver run time** and move
@@ -82,6 +83,8 @@ one-call-per-day on `/players/nfl`. **Check each league's waiver run time** and 
 uv run ffm history 2018 2019 2020 2021 2022 2023 2024 2025
 ```
 Loads weekly player stats, snap counts, schedules (spread/total → implied team totals).
+Only the seasons passed are replaced; with no seasons, `uv run ffm history` refreshes the
+current season (the weekly `history` task does this) and leaves earlier ones intact.
 
 ## Operating it
 ```bash
