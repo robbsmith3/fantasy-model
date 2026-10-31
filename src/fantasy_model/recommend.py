@@ -112,14 +112,26 @@ def load_context(con, platform: str, league_id: str, assume_chop: str | None = N
     )
 
 
-def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int = 300) -> dict:
-    """Returns {'summary': {...}, 'sheet': DataFrame} for the next waiver run."""
+@dataclass
+class LeagueState:
+    vals: pl.DataFrame  # injury-adjusted projections per player, pts_w<N> for sim_weeks
+    sim_weeks: list[int]
+    gain_weeks: list[int]
+    proj: np.ndarray  # (alive teams, sim_weeks) best projected lineup points
+    mu: np.ndarray  # proj extended to every remaining chop
+    sigma: float
+    noise: np.ndarray
+    base: dict  # survival.simulate output
+    me_i: int
+    start: int  # first mu column a pickup from this run affects
+
+
+def league_state(con, ctx: Context, assume_chop: str | None = None) -> LeagueState:
+    """Projections, lineups and the survival simulation for the next waiver run."""
     first = ctx.week + 1  # pickups from this run play from next week on
     sim_weeks = (
         [ctx.week, *range(first, first + 4)] if ctx.chop_pending else list(range(first, first + 4))
     )
-    gain_weeks = list(range(first, first + 4))
-
     vals = fit.adjust_for_injury(
         value.player_values(con, ctx.platform, ctx.league_id, sim_weeks), sim_weeks
     )
@@ -130,8 +142,6 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
             .otherwise(pl.col("owner_team_id"))
             .alias("owner_team_id")
         )
-
-    # Survival model over the remaining chops.
     proj = np.array(
         [
             [fit.lineup_points(vals, t, ctx.slots, sim_weeks)[w] for w in sim_weeks]
@@ -141,9 +151,25 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     mu = survival.extend_horizon(proj, len(ctx.alive) - 1)
     sigma = survival.score_sigma(con, ctx.platform, ctx.league_id, ctx.week - 1)
     noise = survival.common_noise(len(ctx.alive), mu.shape[1])
-    base = survival.simulate(mu, sigma, noise=noise)
-    me_i = ctx.alive.index(ctx.me)
-    start = 1 if ctx.chop_pending else 0
+    return LeagueState(
+        vals=vals,
+        sim_weeks=sim_weeks,
+        gain_weeks=list(range(first, first + 4)),
+        proj=proj,
+        mu=mu,
+        sigma=sigma,
+        noise=noise,
+        base=survival.simulate(mu, sigma, noise=noise),
+        me_i=ctx.alive.index(ctx.me),
+        start=1 if ctx.chop_pending else 0,
+    )
+
+
+def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int = 300) -> dict:
+    """Returns {'summary', 'sheet', 'plan'} for the next waiver run."""
+    st = league_state(con, ctx, assume_chop)
+    vals, gain_weeks, mu, sigma = st.vals, st.gain_weeks, st.mu, st.sigma
+    noise, base, me_i, start = st.noise, st.base, st.me_i, st.start
 
     # Lineup gain per candidate, then league-win gain.
     gains = fit.roster_gain(vals, ctx.me, ctx.slots, gain_weeks, candidates=candidates)
