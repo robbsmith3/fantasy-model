@@ -13,3 +13,5 @@ mlruns/
 .env
 .ruff_cache/
 .idea/workspace.xml
+logs/
+config/leagues.toml

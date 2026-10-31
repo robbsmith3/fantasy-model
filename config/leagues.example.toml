@@ -1,0 +1,22 @@
+# Copy to config/leagues.toml (gitignored). No secrets in here.
+
+[me]
+sleeper_user_id = ""        # curl https://api.sleeper.app/v1/user/<username>  -> user_id
+
+[[league]]
+platform  = "sleeper"
+league_id = ""              # sleeper.com/leagues/<league_id>
+nickname  = "sleeper-guillotine"
+
+[[league]]
+platform  = "yahoo"
+league_id = ""              # league_key, e.g. "461.l.123456" -> get via `uv run ffm yahoo-leagues`
+nickname  = "yahoo-1"
+
+[[league]]
+platform  = "yahoo"
+league_id = ""
+nickname  = "yahoo-2"
+
+[projections]
+weeks_ahead = 4             # each pre_waiver run projects current week + N
