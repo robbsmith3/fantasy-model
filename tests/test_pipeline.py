@@ -6,7 +6,7 @@ import time
 import pytest
 from conftest import FakeResp
 
-from fantasy_model import cli, sleeper, yahoo
+from fantasy_model import cli, espn, fantasypros, sleeper, yahoo
 
 # ---------------------------------------------------------------- Sleeper fixtures
 SLEEPER = {
@@ -263,9 +263,38 @@ def yahoo_get(url, params=None, timeout=None, headers=None):
     raise AssertionError(url)
 
 
+ESPN = {
+    "players": [
+        {
+            "player": {
+                "id": 3916387,
+                "defaultPositionId": 3,
+                "proTeamId": 33,
+                "stats": [
+                    {
+                        "statSourceId": 1,
+                        "statSplitTypeId": 1,
+                        "seasonId": 2026,
+                        "scoringPeriodId": 9,
+                        "stats": {"53": 6.0, "42": 70.0},
+                    }
+                ],
+            }
+        }
+    ]
+}
+
+
+def espn_get(url, params=None, headers=None, timeout=None):
+    return FakeResp(ESPN, url)
+
+
 @pytest.fixture
 def mocked(con, monkeypatch):
     monkeypatch.setattr(sleeper.session, "get", sleeper_get)
+    monkeypatch.setattr(espn.session, "get", espn_get)
+    # FantasyPros comes from nflverse (network); unit-tested separately in test_sources.
+    monkeypatch.setattr(fantasypros, "snapshot_projections", lambda con, sid, season: 0)
     monkeypatch.setattr(yahoo.session, "get", yahoo_get)
     yahoo._save_token(
         {

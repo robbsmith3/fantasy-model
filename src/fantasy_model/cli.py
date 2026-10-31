@@ -5,7 +5,8 @@ Snapshot jobs (idempotent, safe to re-run):
   run pre_waiver   rosters + FAAB per team, last 2 weeks' scores, projections wk..wk+N
   run post_waiver  transactions + winning bids, post-claim rosters/budgets
   run pre_kickoff  final projections + player status (Thu, Sun; replaces `daily` those days)
-  run backfill     Sleeper scores + transactions (incl. bids) for every week so far; one-off
+  run backfill     Sleeper scores + transactions (incl. bids), Sleeper + ESPN projections
+                   for every week so far; one-off, safe to re-run
 
 Setup / utilities:
   yahoo-auth [--redirect URI]   one-time OAuth (run under `op run`)
@@ -25,7 +26,7 @@ import json
 import sys
 import traceback
 
-from fantasy_model import config, db, nflverse, sleeper, yahoo
+from fantasy_model import config, db, espn, fantasypros, nflverse, sleeper, yahoo
 
 JOBS = ("daily", "pre_waiver", "post_waiver", "pre_kickoff", "backfill")
 
@@ -87,8 +88,11 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
                 step(
                     f"yh:{lk}:scores_w{w}", yahoo.sync_week_scores, con, snapshot_id, lk, season, w
                 )
-        for w in range(week, min(week + weeks_ahead, 18) + 1):
+        ahead = list(range(week, min(week + weeks_ahead, 18) + 1))
+        for w in ahead:
             step(f"proj_w{w}", sleeper.snapshot_projections, con, snapshot_id, season, w)
+        step("espn_proj", espn.snapshot_projections, con, snapshot_id, season, ahead)
+        step("fp_proj", fantasypros.snapshot_projections, con, snapshot_id, season)
 
     elif job == "post_waiver":
         for lg in config.leagues(cfg, "sleeper"):
@@ -132,9 +136,16 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
                     season,
                     w,
                 )
+        # Past weeks' projections, for backtests. ESPN serves every week in one call.
+        past = list(range(1, week + 1))
+        step("espn_proj_past", espn.snapshot_projections, con, snapshot_id, season, past)
+        for w in past:
+            step(f"proj_w{w}", sleeper.snapshot_projections, con, snapshot_id, season, w)
 
     elif job == "pre_kickoff":
         step(f"proj_w{week}", sleeper.snapshot_projections, con, snapshot_id, season, week)
+        step("espn_proj", espn.snapshot_projections, con, snapshot_id, season, [week])
+        step("fp_proj", fantasypros.snapshot_projections, con, snapshot_id, season)
         step("players", sleeper.snapshot_players, con, snapshot_id)
 
     else:
