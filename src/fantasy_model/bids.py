@@ -125,20 +125,75 @@ def quality(prior_ppg: float | None, season_pts: float, games: int) -> float | N
     return (prior_ppg * PRIOR_GAMES + season_pts) / (PRIOR_GAMES + games)
 
 
-def _quality(q) -> np.ndarray:
-    """Feature row: intercept, quality (DEF/unknown -> 0 with flag)."""
+# Backtest (`price_backtest`, 2026 legs 3-7, 33 contested auctions, CRPS lower = better):
+# base 103.3; +competition 105.1; +desperation 102.8; +leg 169.9 (extrapolates); +team effects
+# 96.7. So only shrunken team effects are on; comp/desp stay available for re-testing.
+DEFAULT_FEATURES: tuple[str, ...] = ()
+TEAM_SHRINK = {"part": 60.0, "amt": 8.0}  # pseudo-observations pulling team effects to 0
+
+
+def _x(q, comp: float, leg: int, desp: float, feats=DEFAULT_FEATURES) -> np.ndarray:
+    """Feature row for one (opponent, player): intercept, quality (DEF/unknown -> 0 + flag),
+    competition = log(1 + better players in the same pool), leg/18, opponent desperation."""
     known = q is not None and not (isinstance(q, float) and math.isnan(q))
-    return np.array([1.0, q if known else 0.0, 0.0 if known else 1.0])
+    row = [1.0, q if known else 0.0, 0.0 if known else 1.0]
+    if "comp" in feats:
+        row.append(comp)
+    if "leg" in feats:
+        row.append(leg / 18)
+    if "desp" in feats:
+        row.append(desp)
+    return np.array(row)
 
 
-def fit(bt: pl.DataFrame, alive: dict[int, set[str]], legs: list[int] | None = None) -> dict:
-    """Fit participation + amount on main-run claims (the run with the most claims per leg)."""
+def competition(qs: list) -> list[float]:
+    """log(1 + number of players in the pool with higher quality), per player."""
+    vals = np.array([-1.0 if v is None else v for v in qs])
+    return [float(np.log1p((vals > v).sum())) for v in vals]
+
+
+def desperation(con, platform: str, league_id: str, season: int, leg: int, alive) -> dict:
+    """Percentile of each alive team's mean score over its last 3 weeks (<= leg), among alive
+    teams: 0 = scoring best, 1 = scoring worst (closest to the chop)."""
+    rows = con.execute(
+        """SELECT team_id, avg(points) FROM (
+               SELECT team_id, points, row_number() OVER (PARTITION BY team_id ORDER BY week DESC) r
+               FROM team_week WHERE platform = ? AND league_id = ? AND season = ? AND week <= ?
+                 AND points > 0) WHERE r <= 3 GROUP BY team_id""",
+        [platform, league_id, season, leg],
+    ).fetchall()
+    avg = {t: a for t, a in rows if t in alive}
+    order = sorted(avg, key=lambda t: -avg[t])
+    n = max(len(order) - 1, 1)
+    return {t: i / n for i, t in enumerate(order)} | {t: 0.5 for t in alive if t not in avg}
+
+
+def main_runs(bt: pl.DataFrame) -> pl.DataFrame:
+    """Claims from each leg's main waiver run (the run with the most claims)."""
+    main = bt.group_by("leg", "processed_at").len()
+    main = main.sort(["leg", "len", "processed_at"], descending=[False, True, False])
+    main = main.unique("leg", keep="first", maintain_order=True).select("leg", "processed_at")
+    return bt.join(main, on=["leg", "processed_at"]).sort("transaction_id", "player_id")
+
+
+def fit(
+    bt: pl.DataFrame,
+    alive: dict[int, set[str]],
+    legs: list[int] | None = None,
+    desp: dict[int, dict[str, float]] | None = None,
+    feats=DEFAULT_FEATURES,
+    team_effects: bool = True,
+) -> dict:
+    """Fit participation + amount on main-run claims. desp: {leg: {team: desperation}}."""
     if legs is not None:
         bt = bt.filter(pl.col("leg").is_in(legs))
-    main = bt.group_by("leg", "processed_at").len().sort("len", descending=True)
-    main = main.unique("leg", keep="first").select("leg", "processed_at")
-    bt = bt.join(main, on=["leg", "processed_at"])
+    bt = main_runs(bt)
     players = bt.group_by("leg", "player_id").agg(pl.col("quality").first())
+    comp = {}
+    for (lg,), g in players.group_by("leg"):
+        keys = [(lg, p) for p in g["player_id"]]
+        comp.update(zip(keys, competition(g["quality"].to_list()), strict=True))
+    d = desp or {}
 
     # (1) participation: every (player, alive team) pair at that leg; bid > 0 counts as a bid.
     bidders = {
@@ -148,20 +203,41 @@ def fit(bt: pl.DataFrame, alive: dict[int, set[str]], legs: list[int] | None = N
         .agg(pl.col("team_id"))
         .iter_rows()
     }
-    X, y = [], []
+    X, y, tp = [], [], []
     for lg, pid, q in players.iter_rows():
-        for t in alive[lg]:
-            X.append(_quality(q))
+        for t in sorted(alive[lg]):
+            X.append(_x(q, comp[(lg, pid)], lg, d.get(lg, {}).get(t, 0.5), feats))
             y.append(1.0 if t in bidders.get((lg, pid), ()) else 0.0)
-    w_part = _logistic(np.array(X), np.array(y))
+            tp.append(t)
+    X, y = np.array(X), np.array(y)
+    w_part = _logistic(X, y)
 
     # (2) amount: log share of FAAB for positive bids.
     pos = bt.filter(pl.col("bid") > 0)
-    Xa = np.array([_quality(q) for q in pos["quality"].to_list()])
+    Xa = np.array(
+        [
+            _x(q, comp[(lg, p)], lg, d.get(lg, {}).get(t, 0.5), feats)
+            for q, lg, p, t in pos.select("quality", "leg", "player_id", "team_id").iter_rows()
+        ]
+    )
     ya = np.log(pos["share"].clip(upper_bound=1.0).to_numpy())
     w_amt, *_ = np.linalg.lstsq(Xa, ya, rcond=None)
-    resid_sd = float(np.std(ya - Xa @ w_amt, ddof=Xa.shape[1]))
-    return {"w_part": w_part, "w_amt": w_amt, "resid_sd": resid_sd}
+    res_a = ya - Xa @ w_amt
+    model = {"w_part": w_part, "w_amt": w_amt, "feats": feats, "team_part": {}, "team_amt": {}}
+    if team_effects:
+        # Shrunken per-team offsets: logit-scale for participation, log-share for amount.
+        p = 1 / (1 + np.exp(-X @ w_part))
+        for t in sorted(set(tp)):
+            m = np.array(tp) == t
+            model["team_part"][t] = float((y[m] - p[m]).sum() / (p[m] * (1 - p[m])).sum()
+                                          * m.sum() / (m.sum() + TEAM_SHRINK["part"]))  # fmt: skip
+        teams_a = pos["team_id"].to_list()
+        for t in sorted(set(teams_a)):
+            m = np.array(teams_a) == t
+            model["team_amt"][t] = float(res_a[m].sum() / (m.sum() + TEAM_SHRINK["amt"]))
+        res_a = res_a - np.array([model["team_amt"][t] for t in teams_a])
+    model["resid_sd"] = float(np.std(res_a, ddof=Xa.shape[1]))
+    return model
 
 
 def _logistic(X: np.ndarray, y: np.ndarray, iters: int = 500, l2: float = 1e-3) -> np.ndarray:
@@ -174,19 +250,69 @@ def _logistic(X: np.ndarray, y: np.ndarray, iters: int = 500, l2: float = 1e-3) 
 
 
 def max_opponent_bids(
-    model: dict, q, opp_faab: list[int], n_sims: int = 20000, seed: int = 0
+    model: dict,
+    q,
+    opponents: list[tuple[str, int, float]],
+    comp: float = 0.0,
+    leg: int = 9,
+    n_sims: int = 20000,
+    seed: int = 0,
 ) -> np.ndarray:
-    """Simulated highest opponent bid for one player (0 when nobody bids)."""
+    """Simulated highest opponent bid for one player (0 when nobody bids).
+    opponents: (team_id, faab, desperation) for every alive rival."""
     rng = np.random.default_rng(seed)
-    x = _quality(q)
-    p_bid = 1 / (1 + np.exp(-x @ model["w_part"]))
-    faab = np.asarray(opp_faab, dtype=float)
-    share = np.exp(
-        x @ model["w_amt"] + model["resid_sd"] * rng.standard_normal((n_sims, len(faab)))
-    )
-    amt = np.floor(np.minimum(share, 1.0) * faab)
-    bids = np.where(rng.random((n_sims, len(faab))) < p_bid, amt, 0.0)
+    feats = model.get("feats", ())
+    xs = np.array([_x(q, comp, leg, dsp, feats) for _, _, dsp in opponents])
+    team_p = np.array([model["team_part"].get(t, 0.0) for t, _, _ in opponents])
+    p_bid = 1 / (1 + np.exp(-(xs @ model["w_part"] + team_p)))
+    mean = xs @ model["w_amt"] + np.array([model["team_amt"].get(t, 0.0) for t, _, _ in opponents])
+    faab = np.array([f for _, f, _ in opponents], dtype=float)
+    share = np.exp(mean[None, :] + model["resid_sd"] * rng.standard_normal((n_sims, len(faab))))
+    amt = np.floor(np.minimum(share, 1.0) * faab[None, :])
+    bids = np.where(rng.random((n_sims, len(faab))) < p_bid[None, :], amt, 0.0)
     return bids.max(axis=1)
+
+
+def crps(samples: np.ndarray, y: float) -> float:
+    """Continuous ranked probability score of a sample forecast (lower is better)."""
+    s = np.sort(samples)
+    n = len(s)
+    return float(np.abs(s - y).mean() - (2 * np.arange(1, n + 1) - n - 1) @ s / n**2)
+
+
+def price_backtest(
+    con, platform: str, league_id: str, season: int, legs: list[int], min_win: int = 20,
+    scale: float = 1.0, **fit_kw,
+) -> dict:  # fmt: skip
+    """Walk-forward: fit on earlier legs, forecast the winning price of every contested
+    main-run player (winning bid >= min_win). Returns CRPS, 80% coverage, median bias, width."""
+    bt = bid_table(con, platform, league_id, season)
+    alive = alive_by_leg(con, platform, league_id, season)
+    desp = {
+        lg: desperation(con, platform, league_id, season, lg, alive[lg])
+        for lg in range(1, max(legs) + 1)
+    }
+    out = []
+    for leg in legs:
+        model = fit(bt, alive, legs=list(range(1, leg)), desp=desp, **fit_kw)
+        run = main_runs(bt.filter(pl.col("leg") == leg))
+        mp = run["processed_at"][0]
+        spent = dict(bt.filter(pl.col("won") & (pl.col("processed_at") < mp))
+                     .group_by("team_id").agg(pl.col("bid").sum()).iter_rows())  # fmt: skip
+        budget = 1000
+        opps = [(t, budget - spent.get(t, 0), desp[leg].get(t, 0.5)) for t in sorted(alive[leg])]
+        pool = run.group_by("player_id").agg(
+            pl.col("quality").first(), pl.col("bid").max().alias("win")
+        )
+        pool = pool.with_columns(pl.Series("comp", competition(pool["quality"].to_list())))
+        contested = pool.filter(pl.col("win") >= min_win).sort("player_id")
+        for pid, q, win, cp in contested.iter_rows():
+            mx = scale * max_opponent_bids(model, q, opps, cp, leg)
+            lo, med, hi = np.quantile(mx, [0.1, 0.5, 0.9])
+            out.append((leg, pid, win, crps(mx, win), lo <= win <= hi, med - win, hi - lo))
+    a = np.array([r[2:] for r in out], dtype=float)
+    return {"n": len(out), "crps": a[:, 1].mean(), "cover80": a[:, 2].mean(),
+            "bias_median": a[:, 3].mean(), "width80": a[:, 4].mean()}  # fmt: skip
 
 
 def p_win(my_bid: float, max_opp: np.ndarray) -> float:

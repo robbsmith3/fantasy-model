@@ -13,7 +13,9 @@ import polars as pl
 
 from fantasy_model import bids, fit, survival, value
 
-PRICE_BUMP = 1.15  # backtest: model underpriced winning bids by ~$69 (mostly mid-tier players)
+# Was 1.15 to offset underpricing; with per-team effects the backtest median bias is -$24 and any
+# scale-up worsens CRPS (1.0: 96.7, 1.15: 102.7), so no bump.
+PRICE_BUMP = 1.0
 FUTURE_DISCOUNT = 0.6  # a dollar saved buys a pickup with fewer weeks left to help
 CONTESTED_MIN = 25  # market median ($) for a player to count when pricing a dollar
 MAX_DEF = 2  # DEF rows kept on the sheet
@@ -142,7 +144,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         bids.alive_by_leg(con, ctx.platform, ctx.league_id, ctx.season),
     )
     qual = bids.current_quality(con, ctx.season, ctx.week)
-    opp = [ctx.faab[t] for t in ctx.alive if t != ctx.me]
+    opp = [(t, ctx.faab[t], 0.5) for t in ctx.alive if t != ctx.me]
     my_faab = ctx.faab[ctx.me]
     dist = {
         pid: PRICE_BUMP * bids.max_opponent_bids(model, qual.get(pid), opp)
