@@ -198,6 +198,7 @@ def build_rows(con, seasons: list[int], as_of: tuple[int, int] | None = None) ->
         .join(inj, on=["player_id", "season", "week"], how="left")
         .with_columns(pl.col("inj_report").fill_null(0), pl.col("inj_practice").fill_null(0))
         .join(actual, on=["player_id", "season", "week"], how="left")
+        .with_columns(pl.col("actual").is_not_null().alias("played"))
         .with_columns(
             pl.col("actual").fill_null(0.0),
             pl.col("position")
