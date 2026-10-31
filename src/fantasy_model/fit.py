@@ -55,19 +55,26 @@ def adjust_for_injury(values: pl.DataFrame, weeks: list[int]) -> pl.DataFrame:
 
 
 def best_lineup(players: list[tuple[str, str, float]], slots: list[str]) -> float:
-    """Max starting points for (id, position, points) players. Fills the narrowest slots first,
-    which is optimal for nested eligibility (QB ⊂ SUPER_FLEX, RB ⊂ FLEX, ...)."""
+    """Max starting points for (id, position, points) players."""
+    return best_lineup_ids(players, slots)[0]
+
+
+def best_lineup_ids(
+    players: list[tuple[str, str, float]], slots: list[str]
+) -> tuple[float, list[str]]:
+    """(points, starter ids). Fills the narrowest slots first, which is optimal for nested
+    eligibility (QB ⊂ SUPER_FLEX, RB ⊂ FLEX, ...)."""
     starting = sorted((s for s in slots if s in SLOT_ELIGIBLE), key=lambda s: len(SLOT_ELIGIBLE[s]))
     pool = sorted(players, key=lambda p: -p[2])
-    used: set[str] = set()
+    used: list[str] = []
     total = 0.0
     for slot in starting:
         for pid, pos, pts in pool:
             if pid not in used and pos in SLOT_ELIGIBLE[slot]:
-                used.add(pid)
+                used.append(pid)
                 total += max(pts, 0.0)
                 break
-    return total
+    return total, used
 
 
 def _week_players(df: pl.DataFrame, week: int) -> list[tuple[str, str, float]]:

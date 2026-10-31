@@ -105,3 +105,79 @@ def model_backtest(
         ((pl.col("sleeper") + pl.col("espn") + pl.col("model_wf")) / 3).alias("avg3")
     )
     return accuracy(table, ["sleeper", "espn", "model_wf", "avg3"])
+
+
+def sim_validation(
+    con, platform: str, league_id: str, season: int, weeks: list[int], sigma: float = 22.7
+) -> dict:
+    """Score chop predictions on past weeks with each team's actual starters and the pre-game
+    consensus (Sleeper + ESPN). Compares team-level N(sum mu, sigma) with player-level sims.
+
+    Returns per-week rows and summary: mean log-likelihood of the team actually chopped,
+    Brier score over teams, and team-score calibration (z mean/sd, 80% interval coverage)."""
+    import json
+
+    from fantasy_model import player_sim
+
+    scoring = value.league_scoring(con, platform, league_id)
+    bank = player_sim.load_bank(con)
+    rng = np.random.default_rng(1)
+    per_week, zs, cover = [], [], []
+    for w in weeks:
+        tw = con.execute(
+            """SELECT team_id, points, starters FROM team_week
+               WHERE platform = ? AND league_id = ? AND season = ? AND week = ? AND points > 0""",
+            [platform, league_id, season, w],
+        ).fetchall()
+        if len(tw) < 2:
+            continue
+        mus = []
+        for src in ("sleeper", "espn"):
+            mus.append(value.source_points(con, scoring, src, [w], season).select(
+                "player_id", "position", "nfl_team", pl.col("points").alias(src)))  # fmt: skip
+        proj = mus[0].join(mus[1].drop("position", "nfl_team"), on="player_id", how="left")
+        proj = proj.with_columns(pl.mean_horizontal("sleeper", "espn").alias("mu"))
+        lineups = {}
+        for t, _, st in tw:
+            st = json.loads(st) if isinstance(st, str) else st
+            lineups[t] = [p for p in (st or []) if p and p != "0"]
+        sims = player_sim.simulate_lineups(proj, lineups, bank, n_sims=20000, seed=w)
+        teams = [t for t, _, _ in tw]
+        actual = np.array([p for _, p, _ in tw])
+        S = np.stack([sims[t] for t in teams], axis=1)  # (n_sims, teams)
+        mu_team = S.mean(axis=0)
+        p_player = np.bincount(S.argmin(axis=1), minlength=len(teams)) / S.shape[0]
+        T = mu_team[None, :] + sigma * rng.standard_normal(S.shape)
+        p_team = np.bincount(T.argmin(axis=1), minlength=len(teams)) / T.shape[0]
+        chopped = int(actual.argmin())
+        onehot = np.eye(len(teams))[chopped]
+        sd = S.std(axis=0)
+        zs.extend((actual - mu_team) / sd)
+        lo, hi = np.quantile(S, 0.1, axis=0), np.quantile(S, 0.9, axis=0)
+        cover.extend((actual >= lo) & (actual <= hi))
+        per_week.append(
+            {
+                "week": w,
+                "teams": len(teams),
+                "chopped": teams[chopped],
+                "p_player": float(p_player[chopped]),
+                "p_team": float(p_team[chopped]),
+                "rank_player": int((p_player > p_player[chopped]).sum()) + 1,
+                "brier_player": float(((p_player - onehot) ** 2).sum()),
+                "brier_team": float(((p_team - onehot) ** 2).sum()),
+                "proj_bias": float((mu_team - actual).mean()),
+                "team_sd": float(sd.mean()),
+            }
+        )
+    df = pl.DataFrame(per_week)
+    eps = 1e-3
+    summary = {
+        "loglik_player": float(np.log(df["p_player"].to_numpy() + eps).mean()),
+        "loglik_team": float(np.log(df["p_team"].to_numpy() + eps).mean()),
+        "brier_player": float(df["brier_player"].mean()),
+        "brier_team": float(df["brier_team"].mean()),
+        "z_mean": float(np.mean(zs)),
+        "z_sd": float(np.std(zs)),
+        "cover80": float(np.mean(cover)),
+    }
+    return {"weeks": df, "summary": summary}

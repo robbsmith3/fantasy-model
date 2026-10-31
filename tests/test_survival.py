@@ -5,7 +5,7 @@ from fantasy_model import survival as sv
 
 def test_lowest_team_is_chopped_when_noise_is_negligible():
     mu = np.array([[100.0, 100.0], [120.0, 120.0], [140.0, 140.0]])
-    r = sv.simulate(mu, sigma=0.001, n_sims=200)
+    r = sv.simulate(mu, sigma=0.001, n_sims=200, drift=False)
     assert r["p_chop"][0, 0] == 1.0 and r["p_chop"][1, 1] == 1.0
     assert r["p_win"].tolist() == [0.0, 0.0, 1.0]
     assert r["exp_weeks"].tolist() == [0.0, 1.0, 2.0]
@@ -29,3 +29,11 @@ def test_pickup_delta_is_positive_and_zero_for_no_gain():
 def test_extend_horizon_pads_with_team_mean():
     out = sv.extend_horizon(np.array([[100.0, 120.0]]), 4)
     assert out.tolist() == [[100.0, 120.0, 110.0, 110.0]]
+
+
+def test_drift_widens_long_horizon_and_humbles_the_favorite():
+    mu = np.array([[140.0] * 8, *[[125.0] * 8] * 5])
+    noise = sv.common_noise(6, 8, n_sims=8000)
+    fixed = sv.simulate(mu, 22.7, noise=noise, drift=False)["p_win"][0]
+    drifting = sv.simulate(mu, 22.7, noise=noise, drift=True)["p_win"][0]
+    assert drifting < fixed

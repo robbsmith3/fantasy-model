@@ -7,6 +7,11 @@ from __future__ import annotations
 import numpy as np
 
 DEFAULT_SIGMA = 22.7  # pooled within-team weekly SD, Sleeper league weeks 1-7 of 2026
+# Team strength drifts as starters get hurt, lose roles or break out, so a projection k weeks
+# out is less certain than next week's. Starter (mu >= 9) projection change, 2019-25, byes
+# excluded: var ~= 7.3 + 3.0k per player. x9 starters x0.7 (bench absorbs part of each loss):
+# team drift variance ~65 one week ahead, +19 per extra week (sd 8 -> 13 by week 6).
+DRIFT_V1, DRIFT_STEP = 65.0, 19.0
 
 
 def score_sigma(con, platform: str, league_id: str, max_week: int) -> float:
@@ -32,8 +37,10 @@ def simulate(
     n_sims: int = 20000,
     seed: int = 0,
     noise: np.ndarray | None = None,
+    drift: bool = True,
 ) -> dict[str, np.ndarray]:
     """Play out the chops. mu: (teams, weeks) projected scores, one column per remaining chop.
+    Column 0 is the nearest week; with `drift`, later columns get a team-strength random walk.
 
     Returns per-team arrays: p_chop (teams, weeks) = P(eliminated that week), p_win, exp_weeks
     (expected chops survived). Pass the same `noise` (n_sims, teams, weeks) to compare scenarios
@@ -43,6 +50,11 @@ def simulate(
     if noise is None:
         noise = np.random.default_rng(seed).standard_normal((n_sims, n_teams, n_weeks))
     scores = mu[None, :, :] + sigma * noise
+    if drift and n_weeks > 1:
+        # Fixed seed (not `seed`) so two calls with the same `noise` share drift paths too.
+        steps = np.random.default_rng(7919).standard_normal(noise.shape)
+        var = np.array([0.0, DRIFT_V1] + [DRIFT_STEP] * (n_weeks - 2))[:n_weeks]
+        scores = scores + np.cumsum(steps * np.sqrt(var)[None, None, :], axis=2)
     alive = np.ones((noise.shape[0], n_teams), dtype=bool)
     chop_week = np.full((noise.shape[0], n_teams), n_weeks)  # n_weeks = never chopped
     rows = np.arange(noise.shape[0])

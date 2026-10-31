@@ -18,6 +18,7 @@ Setup / utilities:
   eval-projections WEEK [WEEK ...]
                                 accuracy of each projection source + consensus vs actual
   backtest-model WEEK [WEEK ...]  walk-forward accuracy of our model vs sources
+  validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
   recommend [--assume-chop TEAM_ID] [--csv PATH]
                                 bid sheet for the next Sleeper waiver run
 """
@@ -280,6 +281,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("health")
     sub.add_parser("eval-projections").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
+    sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
     rec = sub.add_parser("recommend")
     rec.add_argument("--assume-chop", help="preview as if this team_id were eliminated")
     rec.add_argument("--csv", help="also write the sheet here")
@@ -320,6 +322,14 @@ def main(argv: list[str] | None = None) -> None:
         season = con.execute("SELECT max(season) FROM snapshot_run").fetchall()[0][0]
         acc = evaluate.model_backtest(con, "sleeper", lg["league_id"], season, a.weeks)
         print(acc.with_columns(pl.selectors.float().round(3)))
+    elif a.cmd == "validate-sim":
+        from fantasy_model import evaluate
+
+        lg = config.leagues(config.load_config(), "sleeper")[0]
+        season = con.execute("SELECT max(season) FROM snapshot_run").fetchall()[0][0]
+        r = evaluate.sim_validation(con, "sleeper", lg["league_id"], season, a.weeks)
+        print(r["weeks"].with_columns(pl.selectors.float().round(3)))
+        print({k: round(v, 3) for k, v in r["summary"].items()})
     elif a.cmd == "recommend":
         print_recommendation(con, a.assume_chop, a.csv)
     elif a.cmd == "health":
