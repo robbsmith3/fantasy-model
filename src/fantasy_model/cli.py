@@ -261,7 +261,18 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
             f"{r['d_p_win']:6.2%} {r['bid']:5d} {r['p_win_claim']:6.0%} "
             f"{r['market_median']:7.0f}  {r['drop']}"
         )
-    print("\nBids are independent; if you win one, re-check the rest against your remaining FAAB.")
+    plan = out["plan"]
+    if not plan.is_empty():
+        print(
+            f"\nCLAIM PLAN (joint: distinct drops, total <= ${s['faab']}, each claim valued "
+            "given the ones above may win):"
+        )
+        for r in plan.iter_rows(named=True):
+            print(
+                f"  {r['order']}. {r['player'][:24]:24} {r['pos']:4} bid ${r['bid']:<4} "
+                f"P(get) {r['p_get']:4.0%}  +win {r['d_p_win']:6.2%}  drop {r['drop']}"
+            )
+        print(f"  total if every claim wins: ${plan['bid'].sum()}")
     if csv:
         sheet.write_csv(csv)
         print(f"wrote {csv}")

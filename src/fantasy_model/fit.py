@@ -131,3 +131,37 @@ def roster_gain(
             }
         )
     return pl.DataFrame(out).sort("gain", descending=True)
+
+
+def claim_gain(
+    values: pl.DataFrame,
+    team_id: str,
+    slots: list[str],
+    weeks: list[int],
+    cand_id: str,
+    adds: list[str] = (),
+    drops: list[str] = (),
+    no_drop: set[str] = frozenset(),
+) -> tuple[list[float], str | None]:
+    """Weekly lineup gain from claiming `cand_id` onto team_id's roster after `adds` joined and
+    `drops` left (other claims that won), dropping the cheapest player not in `no_drop`.
+    Returns (gains per week, drop_id)."""
+    owned = values.filter(
+        ((pl.col("owner_team_id") == team_id) & ~pl.col("player_id").is_in(list(drops)))
+        | pl.col("player_id").is_in(list(adds))
+    )
+    cand = values.filter(pl.col("player_id") == cand_id).row(0, named=True)
+    rows = {w: _week_players(owned, w) for w in weeks}
+    base = {w: best_lineup(rows[w], slots) for w in weeks}
+    best = None
+    for drop_id in owned["player_id"]:
+        if drop_id in no_drop or drop_id in adds:
+            continue
+        gains = []
+        for w in weeks:
+            lineup = [p for p in rows[w] if p[0] != drop_id]
+            lineup.append((cand_id, cand["position"], cand[f"pts_w{w}"]))
+            gains.append(best_lineup(lineup, slots) - base[w])
+        if best is None or sum(gains) > sum(best[0]):
+            best = (gains, drop_id)
+    return best if best else ([0.0] * len(weeks), None)
