@@ -11,7 +11,7 @@ Setup / utilities:
   yahoo-leagues                 list your Yahoo league keys
   yahoo-probe <league_key>      dump one page of transactions; confirms faab_bid exists
   idmap                         refresh cross-platform player ID map (nflverse)
-  history <season> [...]        load nflverse weekly stats/snaps/schedules
+  history [<season> ...]        load nflverse weekly stats/snaps/schedules (default: current)
   health                        recent runs, failures, unmapped players
 """
 
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("yahoo-leagues")
     sub.add_parser("yahoo-probe").add_argument("league_key")
     sub.add_parser("idmap")
-    sub.add_parser("history").add_argument("seasons", nargs="+", type=int)
+    sub.add_parser("history").add_argument("seasons", nargs="*", type=int)
     sub.add_parser("health")
     a = ap.parse_args(argv)
 
@@ -193,7 +193,13 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "idmap":
         print("player_id_map rows:", nflverse.load_id_map(con))
     elif a.cmd == "history":
-        print(nflverse.load_history(con, a.seasons))
+        import nflreadpy
+
+        res = nflverse.load_history(con, a.seasons or [nflreadpy.get_current_season()])
+        print(sid, res)
+        if any(isinstance(v, str) for v in res.values()):
+            con.close()
+            sys.exit(1)  # nonzero so Task Scheduler shows the failure
     elif a.cmd == "health":
         health(con)
     con.close()

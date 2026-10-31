@@ -35,8 +35,31 @@ def load_id_map(con) -> int:
     return df.height
 
 
+def _replace_seasons(con, table: str, df: pl.DataFrame, seasons: list[int]) -> None:
+    """Swap in `seasons` rows only; other seasons stay. Atomic, and tolerates new columns."""
+    con.register("_tmp", df.to_arrow())
+    try:
+        con.execute("BEGIN")
+        con.execute(f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM _tmp LIMIT 0")
+        have = {r[0] for r in con.execute(f"DESCRIBE {table}").fetchall()}
+        for col, typ, *_ in con.execute("DESCRIBE _tmp").fetchall():
+            if col not in have:  # nflverse adds columns over time; older seasons get NULL
+                con.execute(f'ALTER TABLE {table} ADD COLUMN "{col}" {typ}')
+        con.execute(f"DELETE FROM {table} WHERE season IN (SELECT unnest(?))", [seasons])
+        con.execute(f"INSERT INTO {table} BY NAME SELECT * FROM _tmp")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    finally:
+        con.unregister("_tmp")
+
+
 def load_history(con, seasons: list[int]) -> dict[str, int]:
-    """Weekly stats, snaps, schedules (spread/total -> implied team totals). Re-fetchable."""
+    """Weekly stats, snaps, schedules (spread/total -> implied team totals). Re-fetchable.
+
+    Only the given seasons are replaced, so `ffm history 2026` refreshes the current year alone.
+    """
     import nflreadpy as nfl
 
     loaders = {
@@ -48,9 +71,7 @@ def load_history(con, seasons: list[int]) -> dict[str, int]:
     for table, fn in loaders.items():
         try:
             df = fn()
-            con.register("_tmp", df.to_arrow())
-            con.execute(f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM _tmp")
-            con.unregister("_tmp")
+            _replace_seasons(con, table, df, seasons)
             out[table] = df.height
         except Exception as e:  # one source failing shouldn't block the others
             out[table] = f"FAILED: {e}"
