@@ -257,9 +257,11 @@ def max_opponent_bids(
     leg: int = 9,
     n_sims: int = 20000,
     seed: int = 0,
-) -> np.ndarray:
+    return_winner: bool = False,
+):
     """Simulated highest opponent bid for one player (0 when nobody bids).
-    opponents: (team_id, faab, desperation) for every alive rival."""
+    opponents: (team_id, faab, desperation) for every alive rival. With return_winner, also the
+    index into `opponents` of the top bidder per sim (-1 when nobody bids)."""
     rng = np.random.default_rng(seed)
     feats = model.get("feats", ())
     xs = np.array([_x(q, comp, leg, dsp, feats) for _, _, dsp in opponents])
@@ -270,7 +272,10 @@ def max_opponent_bids(
     share = np.exp(mean[None, :] + model["resid_sd"] * rng.standard_normal((n_sims, len(faab))))
     amt = np.floor(np.minimum(share, 1.0) * faab[None, :])
     bids = np.where(rng.random((n_sims, len(faab))) < p_bid[None, :], amt, 0.0)
-    return bids.max(axis=1)
+    top = bids.max(axis=1)
+    if return_winner:
+        return top, np.where(top > 0, bids.argmax(axis=1), -1)
+    return top
 
 
 def crps(samples: np.ndarray, y: float) -> float:

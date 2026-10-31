@@ -251,14 +251,14 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
         print("No bid worth placing: no available player improves your lineup enough.")
         return
     print(
-        f"\n{'#':>2} {'player':24} {'pos':4} {'+pts':>5} {'+win':>6} {'BID':>5} "
+        f"\n{'#':>2} {'player':24} {'pos':4} {'+pts':>5} {'+win':>6} {'block':>6} {'BID':>5} "
         f"{'P(get)':>6} {'mkt med':>7}  drop"
     )
     for i, r in enumerate(sheet.head(15).iter_rows(named=True), 1):
         inj = f" ({r['injury']})" if r["injury"] else ""
         print(
             f"{i:2} {(r['player'] + inj)[:24]:24} {r['pos']:4} {r['pts_gain']:5.1f} "
-            f"{r['d_p_win']:6.2%} {r['bid']:5d} {r['p_win_claim']:6.0%} "
+            f"{r['d_p_win']:6.2%} {r['deny']:6.2%} {r['bid']:5d} {r['p_win_claim']:6.0%} "
             f"{r['market_median']:7.0f}  {r['drop']}"
         )
     plan = out["plan"]
