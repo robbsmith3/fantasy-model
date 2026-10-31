@@ -16,7 +16,6 @@ from fantasy_model import bids, fit, survival, value
 # Was 1.15 to offset underpricing; with per-team effects the backtest median bias is -$24 and any
 # scale-up worsens CRPS (1.0: 96.7, 1.15: 102.7), so no bump.
 PRICE_BUMP = 1.0
-FUTURE_DISCOUNT = 0.6  # a dollar saved buys a pickup with fewer weeks left to help
 CONTESTED_MIN = 25  # market median ($) for a player to count when pricing a dollar
 MAX_DEF = 2  # DEF rows kept on the sheet
 MAX_CLAIMS, PLAN_POOL = 4, 8  # joint plan: up to 4 claims chosen from the top 8 sheet rows
@@ -35,6 +34,18 @@ class Context:
     faab: dict[str, int]
     names: dict[str, str]
     chop_pending: bool  # this week's lowest team not yet eliminated
+
+
+def future_discount(p_chop: np.ndarray) -> float:
+    """What a saved dollar is worth relative to spending it now: the average, over the future
+    waiver runs, of P(we're still alive then) x (share of the remaining chops a pickup made
+    then still plays). A team likely to be chopped soon should spend now; a safe team saves.
+    p_chop: our P(eliminated) per remaining chop, starting with the next one."""
+    n = len(p_chop)
+    if n < 2:
+        return 0.0
+    alive = 1 - np.cumsum(p_chop)
+    return float(np.mean([alive[k - 1] * (n - k) / n for k in range(1, n)]))
 
 
 def best_bid(max_opp_sorted: np.ndarray, d_p_win: float, lam: float, faab: int, deny_sorted=None):
@@ -168,7 +179,8 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         ),
         reverse=True,
     )
-    lam = FUTURE_DISCOUNT * float(np.median(rates[:10])) if rates else DEFAULT_LAMBDA
+    discount = future_discount(base["p_chop"][me_i, start:])
+    lam = discount * float(np.median(rates[:10])) if rates else DEFAULT_LAMBDA
 
     # Denial: for the most valuable candidates, who would win him if we don't, and what that
     # rival's gain costs our P(win). Ordered by standalone value so the costly sims stay few.
@@ -231,6 +243,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
             "p_win": float(base["p_win"][me_i]),
             "p_chop_next": float(base["p_chop"][me_i, 0]),
             "lambda_per_100": lam * 100,
+            "faab_discount": discount,
             "sigma": sigma,
         },
         "sheet": sheet,

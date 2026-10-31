@@ -245,7 +245,8 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
     print(
         f"P(win league) {s['p_win']:.1%}   "
         f"P(chopped {'this' if s['chop_pending'] else 'next'} week) {s['p_chop_next']:.1%}   "
-        f"$100 of FAAB ~ {s['lambda_per_100']:.2%} win prob"
+        f"$100 of FAAB ~ {s['lambda_per_100']:.2%} win prob "
+        f"(saved $ worth {s['faab_discount']:.0%} of spent $)"
     )
     if sheet.is_empty():
         print("No bid worth placing: no available player improves your lineup enough.")
