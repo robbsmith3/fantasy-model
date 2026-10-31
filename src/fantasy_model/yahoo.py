@@ -48,7 +48,14 @@ def authorize(redirect_uri: str = "oob") -> None:
     if not cid or not secret:
         raise SystemExit("Set YAHOO_CLIENT_ID / YAHOO_CLIENT_SECRET (use `op run --env-file`).")
     q = urllib.parse.urlencode(
-        {"client_id": cid, "redirect_uri": redirect_uri, "response_type": "code"}
+        # fspt-r = Fantasy Sports read. Note: since 2026-07 Yahoo also requires the app itself
+        # to be approved for the Fantasy API; until then every call 403s despite a valid token.
+        {
+            "client_id": cid,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "fspt-r",
+        }
     )
     print(f"Open this URL, approve, then paste the code:\n\n  {AUTH_URL}?{q}\n")
     print("(If redirect_uri is https://localhost..., copy `code=` from the address bar.)")
