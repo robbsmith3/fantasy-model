@@ -66,6 +66,14 @@ def load_history(con, seasons: list[int]) -> dict[str, int]:
         "nfl_player_stats": lambda: nfl.load_player_stats(seasons),
         "nfl_snap_counts": lambda: nfl.load_snap_counts(seasons),
         "nfl_schedules": lambda: nfl.load_schedules(seasons),
+        # ffverse expected fantasy points from usage (open-source model); key input for our own
+        # projections since usage predicts future scoring better than realized points.
+        # (it ships season as text and week as float; normalize to match the other tables)
+        # Official weekly injury reports (filed Wed-Fri, before the game).
+        "nfl_injuries": lambda: nfl.load_injuries(seasons=seasons),
+        "nfl_ff_opportunity": lambda: nfl.load_ff_opportunity(seasons=seasons).with_columns(
+            pl.col("season").cast(pl.Int32), pl.col("week").cast(pl.Int32)
+        ),
     }
     out = {}
     for table, fn in loaders.items():

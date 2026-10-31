@@ -15,6 +15,9 @@ Setup / utilities:
   idmap                         refresh cross-platform player ID map (nflverse)
   history [<season> ...]        load nflverse weekly stats/snaps/schedules (default: current)
   health                        recent runs, failures, unmapped players
+  eval-projections WEEK [WEEK ...]
+                                accuracy of each projection source + consensus vs actual
+  backtest-model WEEK [WEEK ...]  walk-forward accuracy of our model vs sources
   recommend [--assume-chop TEAM_ID] [--csv PATH]
                                 bid sheet for the next Sleeper waiver run
 """
@@ -26,7 +29,18 @@ import json
 import sys
 import traceback
 
-from fantasy_model import config, db, espn, fantasypros, nflverse, sleeper, yahoo
+import polars as pl
+
+from fantasy_model import (
+    config,
+    db,
+    espn,
+    fantasypros,
+    nflverse,
+    projection_model,
+    sleeper,
+    yahoo,
+)
 
 JOBS = ("daily", "pre_waiver", "post_waiver", "pre_kickoff", "backfill")
 
@@ -92,6 +106,7 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
         for w in ahead:
             step(f"proj_w{w}", sleeper.snapshot_projections, con, snapshot_id, season, w)
         step("espn_proj", espn.snapshot_projections, con, snapshot_id, season, ahead)
+        step("model_proj", projection_model.snapshot_projections, con, snapshot_id, season, ahead)
         step("fp_proj", fantasypros.snapshot_projections, con, snapshot_id, season)
 
     elif job == "post_waiver":
@@ -198,6 +213,22 @@ def health(con) -> None:
     )
 
 
+def print_eval(con, weeks: list[int]) -> None:
+    from fantasy_model import evaluate
+
+    lg = config.leagues(config.load_config(), "sleeper")[0]
+    season = con.execute("SELECT max(season) FROM snapshot_run").fetchall()[0][0]
+    table = evaluate.projection_table(con, "sleeper", lg["league_id"], season, weeks)
+    cols = [c for c in ("sleeper", "espn", "fantasypros", "consensus") if c in table.columns]
+    common = [c for c in cols if table[c].null_count() < table.height]
+    acc = evaluate.accuracy(table, [c for c in common if table[c].null_count() == 0] or common)
+    print(
+        f"weeks {weeks}: {table.height} relevant player-weeks (any source >= "
+        f"{evaluate.RELEVANT:g} pts); rows where every listed source projects the player"
+    )
+    print(acc)
+
+
 def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
     from fantasy_model import recommend
 
@@ -247,6 +278,8 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("idmap")
     sub.add_parser("history").add_argument("seasons", nargs="*", type=int)
     sub.add_parser("health")
+    sub.add_parser("eval-projections").add_argument("weeks", nargs="+", type=int)
+    sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
     rec = sub.add_parser("recommend")
     rec.add_argument("--assume-chop", help="preview as if this team_id were eliminated")
     rec.add_argument("--csv", help="also write the sheet here")
@@ -278,6 +311,15 @@ def main(argv: list[str] | None = None) -> None:
         if any(isinstance(v, str) for v in res.values()):
             con.close()
             sys.exit(1)  # nonzero so Task Scheduler shows the failure
+    elif a.cmd == "eval-projections":
+        print_eval(con, a.weeks)
+    elif a.cmd == "backtest-model":
+        from fantasy_model import evaluate
+
+        lg = config.leagues(config.load_config(), "sleeper")[0]
+        season = con.execute("SELECT max(season) FROM snapshot_run").fetchall()[0][0]
+        acc = evaluate.model_backtest(con, "sleeper", lg["league_id"], season, a.weeks)
+        print(acc.with_columns(pl.selectors.float().round(3)))
     elif a.cmd == "recommend":
         print_recommendation(con, a.assume_chop, a.csv)
     elif a.cmd == "health":

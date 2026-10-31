@@ -38,3 +38,28 @@ def test_player_values_sums_weeks_zero_fills_byes_and_marks_owners(con):
     assert rows["A"]["ros_pts"] == 8.0 and rows["A"]["owner_team_id"] is None
     assert rows["B"]["pts_w10"] == 0.0 and rows["B"]["owner_team_id"] == "7"
     assert v["player_id"].to_list() == ["A", "B"]
+
+
+def test_consensus_averages_sources_maps_ids_and_respects_cutoff(con):
+    con.execute(
+        "INSERT INTO league (platform, league_id, season, scoring) VALUES ('sleeper','L',2026,?)",
+        [json.dumps(PPR)],
+    )
+    con.execute(
+        "INSERT INTO player_id_map (sleeper_id, espn_id, fantasypros_id) VALUES ('A','e1','f1')"
+    )
+    rows = [
+        ("s1", "sleeper", "A", {"rec": 10}),
+        ("s2", "sleeper", "A", {"rec": 12}),  # newer Sleeper snapshot wins
+        ("s1", "espn", "e1", {"rec": 6}),
+        ("s1", "fantasypros", "f1", {"pts_fp": 11.0}),
+    ]
+    for snap, src, pid, st in rows:
+        con.execute(
+            "INSERT INTO projection_snapshot VALUES (?,?,2026,9,?,'WR','KC',?)",
+            [snap, src, pid, json.dumps(st)],
+        )
+    p = value.projected_points(con, "sleeper", "L", [9]).row(0, named=True)
+    assert (p["player_id"], p["points"], p["n_sources"]) == ("A", round((12 + 6 + 11) / 3, 2), 3)
+    early = value.projected_points(con, "sleeper", "L", [9], before="s2").row(0, named=True)
+    assert early["points"] == round((10 + 6 + 11) / 3, 2)  # point-in-time: s2 not yet visible
