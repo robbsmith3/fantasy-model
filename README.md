@@ -95,6 +95,32 @@ uv run python -c "import duckdb; print(duckdb.connect('data/guillotine.duckdb').
 A job exits non-zero and records `ok=false` + traceback in `snapshot_run.error` if any step
 fails, but **other leagues/steps still run** (per-step isolation).
 
+## Phase 2 — Bid recommendations (`ffm recommend`)
+Run Tuesday night after `pre_waiver` (the chopped roster is in the pool by then):
+```bash
+uv run ffm recommend                     # bid sheet + joint claim plan for the next Sleeper run
+uv run ffm recommend --assume-chop 12    # preview: as if team 12 were chopped this week
+uv run ffm recommend --csv bids.csv      # also save the sheet
+```
+How a bid is chosen, module by module:
+
+| Step | Module | What it does | Evidence (2026 Sleeper league) |
+|---|---|---|---|
+| Projections | `value`, `espn`, `fantasypros`, `projection_model` | Equal-weight mean of Sleeper, ESPN, FantasyPros (current week) and our LightGBM model on nflverse usage / expected points / Vegas lines | wks 2-7 MAE 5.38 vs Sleeper 5.42; fitted weights no better (`ffm backtest-model 2 3 4 5 6 7`) |
+| Lineup fit | `fit` | Best legal lineup each week; points a pickup adds net of the cheapest drop; injury discounts | — |
+| Survival | `survival` | Monte Carlo of the remaining chops: weekly score sd 22.7 + team-strength drift (injuries/roles) | Team scores calibrated: 80% intervals cover 80% (`ffm validate-sim 1 2 3 4 5 6 7`) |
+| Opponent bids | `bids` | Per-opponent participation + share-of-FAAB model with shrunken team tendencies | CRPS 103 -> 97 vs league-wide model; ranges a bit narrow (67% vs 80%) |
+| Decision | `recommend` | Bid maximizing P(get) x (win-prob gain - $ x price) + blocking value; joint plan with distinct drops within FAAB | — |
+
+Price of a dollar: median win-prob-per-$ among contested players this week x a discount from
+our own survival curve (a team near the chop spends now; a safe team keeps money's option value).
+
+Keep these fresh: `ffm history` weekly (scheduled), and `ffm run backfill` after a missed week.
+
+**Known model gaps**: rivals' future FAAB pickups aren't simulated (rosters fixed), so P(win) is
+still optimistic for strong teams; injury discounts in `fit.INJURY_AVAIL` are hand-set; competition
+and desperation features showed no gain on 33 auctions but are kept for re-testing.
+
 ## Design rules
 1. **Raw first** — every response lands in `raw_response` before parsing; parser bugs are
    fixed by re-parsing, never by lost snapshots. Matters most for Yahoo (parser written
