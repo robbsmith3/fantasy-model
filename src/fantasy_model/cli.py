@@ -5,6 +5,7 @@ Snapshot jobs (idempotent, safe to re-run):
   run pre_waiver   rosters + FAAB per team, last 2 weeks' scores, projections wk..wk+N
   run post_waiver  transactions + winning bids, post-claim rosters/budgets
   run pre_kickoff  final projections + player status (Thu, Sun; replaces `daily` those days)
+  run backfill     Sleeper scores + transactions (incl. bids) for every week so far; one-off
 
 Setup / utilities:
   yahoo-auth [--redirect URI]   one-time OAuth (run under `op run`)
@@ -13,6 +14,8 @@ Setup / utilities:
   idmap                         refresh cross-platform player ID map (nflverse)
   history [<season> ...]        load nflverse weekly stats/snaps/schedules (default: current)
   health                        recent runs, failures, unmapped players
+  recommend [--assume-chop TEAM_ID] [--csv PATH]
+                                bid sheet for the next Sleeper waiver run
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import traceback
 
 from fantasy_model import config, db, nflverse, sleeper, yahoo
 
-JOBS = ("daily", "pre_waiver", "post_waiver", "pre_kickoff")
+JOBS = ("daily", "pre_waiver", "post_waiver", "pre_kickoff", "backfill")
 
 
 def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
@@ -106,6 +109,30 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
             step(f"yh:{lk}:txns", yahoo.sync_transactions, con, snapshot_id, lk, season)
             step(f"yh:{lk}:league", yahoo.sync_league, con, snapshot_id, lk)
 
+    elif job == "backfill":
+        # Sleeper serves past weeks' scores and transactions, so these can be recovered.
+        for lg in config.leagues(cfg, "sleeper"):
+            lid = lg["league_id"]
+            for w in range(1, week + 1):
+                step(
+                    f"sl:{lid}:scores_w{w}",
+                    sleeper.sync_week_scores,
+                    con,
+                    snapshot_id,
+                    lid,
+                    season,
+                    w,
+                )
+                step(
+                    f"sl:{lid}:txns_leg{w}",
+                    sleeper.sync_transactions,
+                    con,
+                    snapshot_id,
+                    lid,
+                    season,
+                    w,
+                )
+
     elif job == "pre_kickoff":
         step(f"proj_w{week}", sleeper.snapshot_projections, con, snapshot_id, season, week)
         step("players", sleeper.snapshot_players, con, snapshot_id)
@@ -160,6 +187,43 @@ def health(con) -> None:
     )
 
 
+def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
+    from fantasy_model import recommend
+
+    cfg = config.load_config()
+    lg = config.leagues(cfg, "sleeper")[0]
+    ctx = recommend.load_context(con, "sleeper", lg["league_id"], assume_chop)
+    out = recommend.recommend(con, ctx, assume_chop)
+    s, sheet = out["summary"], out["sheet"]
+    print(
+        f"{s['team']}  |  FAAB ${s['faab']}  |  week {s['week']}"
+        + (f"  |  PREVIEW: {s['assume_chop']} chopped" if s["assume_chop"] else "")
+    )
+    print(
+        f"P(win league) {s['p_win']:.1%}   "
+        f"P(chopped {'this' if s['chop_pending'] else 'next'} week) {s['p_chop_next']:.1%}   "
+        f"$100 of FAAB ~ {s['lambda_per_100']:.2%} win prob"
+    )
+    if sheet.is_empty():
+        print("No bid worth placing: no available player improves your lineup enough.")
+        return
+    print(
+        f"\n{'#':>2} {'player':24} {'pos':4} {'+pts':>5} {'+win':>6} {'BID':>5} "
+        f"{'P(get)':>6} {'mkt med':>7}  drop"
+    )
+    for i, r in enumerate(sheet.head(15).iter_rows(named=True), 1):
+        inj = f" ({r['injury']})" if r["injury"] else ""
+        print(
+            f"{i:2} {(r['player'] + inj)[:24]:24} {r['pos']:4} {r['pts_gain']:5.1f} "
+            f"{r['d_p_win']:6.2%} {r['bid']:5d} {r['p_win_claim']:6.0%} "
+            f"{r['market_median']:7.0f}  {r['drop']}"
+        )
+    print("\nBids are independent; if you win one, re-check the rest against your remaining FAAB.")
+    if csv:
+        sheet.write_csv(csv)
+        print(f"wrote {csv}")
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         prog="ffm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -172,6 +236,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("idmap")
     sub.add_parser("history").add_argument("seasons", nargs="*", type=int)
     sub.add_parser("health")
+    rec = sub.add_parser("recommend")
+    rec.add_argument("--assume-chop", help="preview as if this team_id were eliminated")
+    rec.add_argument("--csv", help="also write the sheet here")
     a = ap.parse_args(argv)
 
     if a.cmd == "run":
@@ -200,6 +267,8 @@ def main(argv: list[str] | None = None) -> None:
         if any(isinstance(v, str) for v in res.values()):
             con.close()
             sys.exit(1)  # nonzero so Task Scheduler shows the failure
+    elif a.cmd == "recommend":
+        print_recommendation(con, a.assume_chop, a.csv)
     elif a.cmd == "health":
         health(con)
     con.close()
