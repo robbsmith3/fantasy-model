@@ -19,6 +19,7 @@ PRICE_BUMP = 1.0
 FUTURE_DISCOUNT = 0.6  # a dollar saved buys a pickup with fewer weeks left to help
 CONTESTED_MIN = 25  # market median ($) for a player to count when pricing a dollar
 MAX_DEF = 2  # DEF rows kept on the sheet
+MAX_CLAIMS, PLAN_POOL = 4, 8  # joint plan: up to 4 claims chosen from the top 8 sheet rows
 DEFAULT_LAMBDA = 0.0002  # win prob per $ when nothing is contested (~2% per $100; 2026 previews)
 
 
@@ -188,7 +189,11 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     sheet = sheet.filter(
         (pl.col("pos") != "DEF") | (pl.col("pos").cum_count().over("pos") <= MAX_DEF)
     )
+    plan = claim_plan(
+        sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, my_faab
+    )
     return {
+        "plan": plan,
         "summary": {
             "team": ctx.names[ctx.me],
             "faab": my_faab,
@@ -202,3 +207,79 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         },
         "sheet": sheet,
     }
+
+
+def claim_plan(
+    sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, faab,
+    max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL,
+) -> pl.DataFrame:  # fmt: skip
+    """Greedy joint plan. Each step re-values every remaining candidate given the claims already
+    chosen: averaged over which of them win (their P(get)), using the roster those wins produce,
+    with a drop no earlier claim uses, and a bid that keeps the plan's total within FAAB."""
+    from itertools import product
+
+    cands = sheet.head(pool).select("player_id", "player", "pos").rows()
+    chosen: list[dict] = []
+    for _ in range(max_claims):
+        budget = faab - sum(c["bid"] for c in chosen)
+        best = None
+        for pid, name, pos in cands:
+            if budget <= 0 or any(c["player_id"] == pid for c in chosen):
+                continue
+            d_win = 0.0
+            for outcome in product((True, False), repeat=len(chosen)):
+                pairs = list(zip(chosen, outcome, strict=True))
+                prob = float(np.prod([c["p_get"] if w else 1 - c["p_get"] for c, w in pairs]))
+                won = [c for c, w in pairs if w]
+                adds = [c["player_id"] for c in won]
+                drops = [c["drop_id"] for c in won]
+                used = {c["drop_id"] for c in chosen}
+                gains, _ = fit.claim_gain(
+                    vals, ctx.me, ctx.slots, gain_weeks, pid, adds, drops, used
+                )
+                # Base team strength in this outcome includes the earlier wins' gains.
+                bumped = mu.copy()
+                for c in won:
+                    g = np.array(c["gains"])
+                    span = mu.shape[1] - start
+                    g = np.concatenate([g, np.full(max(span - len(g), 0), g.mean())])[:span]
+                    bumped[me_i, start:] += g
+                d = survival.pickup_delta(bumped, me_i, np.array(gains), sigma, noise, start)
+                d_win += prob * d["d_p_win"]
+            b, p_get, ev = best_bid(np.sort(dist[pid]), d_win, lam, budget)
+            if b > 0 and ev > 0 and (best is None or ev > best["ev"]):
+                g0, drop0 = fit.claim_gain(
+                    vals, ctx.me, ctx.slots, gain_weeks, pid,
+                    no_drop={c["drop_id"] for c in chosen},
+                )  # fmt: skip
+                best = {"player_id": pid, "player": name, "pos": pos, "bid": b, "p_get": p_get,
+                        "ev": ev, "d_p_win": d_win, "drop_id": drop0, "gains": g0}  # fmt: skip
+        if best is None:
+            break
+        chosen.append(best)
+    names = dict(vals.select("player_id", "full_name").iter_rows())
+    return pl.DataFrame(
+        [
+            {
+                "order": i + 1,
+                "player": c["player"],
+                "pos": c["pos"],
+                "bid": c["bid"],
+                "p_get": c["p_get"],
+                "d_p_win": c["d_p_win"],
+                "drop": names.get(c["drop_id"]),
+                "player_id": c["player_id"],
+            }  # fmt: skip
+            for i, c in enumerate(chosen)
+        ],
+        schema={
+            "order": pl.Int64,
+            "player": pl.Utf8,
+            "pos": pl.Utf8,
+            "bid": pl.Int64,
+            "p_get": pl.Float64,
+            "d_p_win": pl.Float64,
+            "drop": pl.Utf8,
+            "player_id": pl.Utf8,
+        },  # fmt: skip
+    )

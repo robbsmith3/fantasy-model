@@ -38,3 +38,27 @@ def test_roster_gain_counts_bye_cover_and_picks_cheapest_drop():
     g = fit.roster_gain(values, "me", SLOTS, [1, 2]).row(0, named=True)
     # wk1: FA (9) beats X (8) at FLEX -> +1; wk2: FA covers R's bye at RB -> +9
     assert (g["gain_w1"], g["gain_w2"], g["drop_name"]) == (1.0, 9.0, "Bench")
+
+
+def test_claim_gain_accounts_for_earlier_wins_and_reserved_drops():
+    values = pl.DataFrame(
+        {
+            "player_id": ["q", "d1", "bn1", "bn2", "defA", "defB"],
+            "full_name": ["Q", "D1", "B1", "B2", "DefA", "DefB"],
+            "position": ["QB", "DEF", "WR", "WR", "DEF", "DEF"],
+            "nfl_team": ["A"] * 6,
+            "injury_status": [None] * 6,
+            "owner_team_id": ["me", "me", "me", "me", None, None],
+            "pts_w1": [20.0, 4.0, 1.0, 2.0, 9.0, 8.0],
+            "ros_pts": [20.0, 4.0, 1.0, 2.0, 9.0, 8.0],
+        }
+    )
+    slots = ["QB", "DEF", "BN", "BN"]
+    gains, drop = fit.claim_gain(values, "me", slots, [1], "defB")
+    # DefB (8) replaces D1 (4); dropping D1 or a bench WR costs nothing, so any of them ties.
+    assert gains == [4.0] and drop in {"d1", "bn1", "bn2"}
+    # If DefA (9) already won, DefB adds nothing; and bn1 is reserved for that claim.
+    gains, drop = fit.claim_gain(
+        values, "me", slots, [1], "defB", adds=["defA"], drops=["bn1"], no_drop={"bn1"}
+    )
+    assert gains == [0.0] and drop not in {"bn1", "defA"}
