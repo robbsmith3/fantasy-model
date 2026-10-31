@@ -20,6 +20,7 @@ Setup / utilities:
   backtest-model WEEK [WEEK ...]  walk-forward accuracy of our model vs sources
   validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
   recommend [--assume-chop TEAM_ID] [--csv PATH]
+  serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
                                 bid sheet for the next Sleeper waiver run
 """
 
@@ -294,6 +295,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("eval-projections").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
+    srv = sub.add_parser("serve")
+    srv.add_argument("--host", default="127.0.0.1")
+    srv.add_argument("--port", type=int, default=8000)
     rec = sub.add_parser("recommend")
     rec.add_argument("--assume-chop", help="preview as if this team_id were eliminated")
     rec.add_argument("--csv", help="also write the sheet here")
@@ -301,6 +305,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if a.cmd == "run":
         sys.exit(0 if run_job(a.job) else 1)
+    if a.cmd == "serve":
+        from fantasy_model import api
+
+        return api.serve(a.host, a.port)
     if a.cmd == "yahoo-auth":
         return yahoo.authorize(a.redirect)
 
