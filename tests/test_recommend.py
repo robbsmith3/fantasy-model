@@ -19,3 +19,17 @@ def test_never_bids_more_than_faab_and_trades_off_probability():
     opp = np.sort(np.random.default_rng(0).uniform(0, 400, 5000))
     bid, p_get, ev = best_bid(opp, d_p_win=0.08, lam=0.0002, faab=300)
     assert 0 < bid <= 300 and 0 < p_get < 1 and ev > 0
+
+
+def test_denial_raises_the_bid_for_a_player_rivals_would_use_against_us():
+    rng = np.random.default_rng(0)
+    opp = np.sort(rng.uniform(0, 300, 5000))
+    plain, _, _ = best_bid(opp, d_p_win=0.03, lam=0.0002, faab=500)
+    harm = np.full(5000, 0.02)  # whoever outbids us gains enough to cost us 2 win pts
+    blocked, _, ev = best_bid(opp, d_p_win=0.03, lam=0.0002, faab=500, deny_sorted=harm)
+    assert blocked > plain and ev > 0
+
+
+def test_zero_denial_matches_plain_bid():
+    opp = np.sort(np.random.default_rng(1).uniform(0, 300, 5000))
+    assert best_bid(opp, 0.03, 0.0002, 500) == best_bid(opp, 0.03, 0.0002, 500, np.zeros(5000))

@@ -37,14 +37,20 @@ class Context:
     chop_pending: bool  # this week's lowest team not yet eliminated
 
 
-def best_bid(max_opp_sorted: np.ndarray, d_p_win: float, lam: float, faab: int):
-    """Bid in [0, faab] maximizing P(get | b) * (d_p_win - lam * b). Ties count half.
+def best_bid(max_opp_sorted: np.ndarray, d_p_win: float, lam: float, faab: int, deny_sorted=None):
+    """Bid in [0, faab] maximizing P(get | b) * (d_p_win - lam * b) + denial(b). Ties count half.
+    deny_sorted: per-sim loss to our P(win) if that sim's top rival bidder gets the player,
+    aligned with max_opp_sorted; denial(b) = expected loss avoided by outbidding him.
     Returns (bid, P(get), EV)."""
+    n = len(max_opp_sorted)
     grid = np.arange(0, faab + 1)
-    below = np.searchsorted(max_opp_sorted, grid, side="left") / len(max_opp_sorted)
-    at_or_below = np.searchsorted(max_opp_sorted, grid, side="right") / len(max_opp_sorted)
-    p = below + 0.5 * (at_or_below - below)
+    lt = np.searchsorted(max_opp_sorted, grid, side="left")
+    le = np.searchsorted(max_opp_sorted, grid, side="right")
+    p = (lt + 0.5 * (le - lt)) / n
     ev = p * (d_p_win - lam * grid)
+    if deny_sorted is not None:
+        cum = np.concatenate([[0.0], np.cumsum(deny_sorted)])
+        ev = ev + (cum[lt] + 0.5 * (cum[le] - cum[lt])) / n
     i = int(ev.argmax())
     return int(grid[i]), float(p[i]), float(ev[i])
 
@@ -164,10 +170,31 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     )
     lam = FUTURE_DISCOUNT * float(np.median(rates[:10])) if rates else DEFAULT_LAMBDA
 
+    # Denial: for the most valuable candidates, who would win him if we don't, and what that
+    # rival's gain costs our P(win). Ordered by standalone value so the costly sims stay few.
+    deny = {}
+    order = gains.sort("d_p_win", descending=True)["player_id"].head(PLAN_POOL).to_list()
+    for pid in order:
+        mx, who = bids.max_opponent_bids(model, qual.get(pid), opp, return_winner=True)
+        loss = np.zeros(len(opp))
+        for k, (t, _, _) in enumerate(opp):
+            if (who == k).mean() < 0.01:
+                continue
+            g_t, _ = fit.claim_gain(vals, t, ctx.slots, gain_weeks, pid)
+            if sum(g_t) <= 0:
+                continue
+            d = survival.pickup_delta(mu, ctx.alive.index(t), np.array(g_t), sigma, noise, start)
+            loss[k] = max(-d["d_p_win_all"][me_i], 0.0)
+        per_sim = np.where(who >= 0, loss[np.maximum(who, 0)], 0.0)
+        o = np.argsort(PRICE_BUMP * mx, kind="stable")
+        dist[pid] = PRICE_BUMP * mx
+        deny[pid] = (o, per_sim[o])
+
     rows = []
     for r in gains.iter_rows(named=True):
         mx = np.sort(dist[r["player_id"]])
-        b, p_get, ev = best_bid(mx, r["d_p_win"], lam, my_faab)
+        dn = deny.get(r["player_id"])
+        b, p_get, ev = best_bid(mx, r["d_p_win"], lam, my_faab, dn[1] if dn else None)
         rows.append(
             {
                 "player": r["full_name"],
@@ -179,6 +206,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
                 "bid": b,
                 "p_win_claim": p_get,
                 "ev": ev,
+                "deny": float(dn[1].mean()) if dn else 0.0,
                 "market_median": float(np.median(mx)),
                 "drop": r["drop_name"],
                 "player_id": r["player_id"],
@@ -190,7 +218,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         (pl.col("pos") != "DEF") | (pl.col("pos").cum_count().over("pos") <= MAX_DEF)
     )
     plan = claim_plan(
-        sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, my_faab
+        sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, my_faab, deny
     )
     return {
         "plan": plan,
@@ -210,7 +238,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
 
 
 def claim_plan(
-    sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, faab,
+    sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, faab, deny=None,
     max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL,
 ) -> pl.DataFrame:  # fmt: skip
     """Greedy joint plan. Each step re-values every remaining candidate given the claims already
@@ -246,7 +274,8 @@ def claim_plan(
                     bumped[me_i, start:] += g
                 d = survival.pickup_delta(bumped, me_i, np.array(gains), sigma, noise, start)
                 d_win += prob * d["d_p_win"]
-            b, p_get, ev = best_bid(np.sort(dist[pid]), d_win, lam, budget)
+            dn = (deny or {}).get(pid)
+            b, p_get, ev = best_bid(np.sort(dist[pid]), d_win, lam, budget, dn[1] if dn else None)
             if b > 0 and ev > 0 and (best is None or ev > best["ev"]):
                 g0, drop0 = fit.claim_gain(
                     vals, ctx.me, ctx.slots, gain_weeks, pid,

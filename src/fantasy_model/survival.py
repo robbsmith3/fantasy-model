@@ -104,4 +104,5 @@ def pickup_delta(
     return {
         "d_p_win": float(new["p_win"][team_idx] - base["p_win"][team_idx]),
         "d_exp_weeks": float(new["exp_weeks"][team_idx] - base["exp_weeks"][team_idx]),
+        "d_p_win_all": new["p_win"] - base["p_win"],  # every team's change (rivals' effect on us)
     }
