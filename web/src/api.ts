@@ -69,6 +69,9 @@ export type SheetRow = {
   market_median: number;
   drop: string;
   player_id: string;
+  rival: string | null;
+  rival_p: number | null;
+  curve: [number, number][];
 };
 export type PlanRow = {
   order: number;
@@ -126,6 +129,7 @@ export type Live = {
   week: number;
   games: { pre: number; live: number; final: number };
   teams: LiveTeam[];
+  chop_line: { p10: number; p50: number; p90: number };
   fetched_at: number;
 };
 export type Timeline = {

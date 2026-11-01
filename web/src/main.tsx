@@ -58,7 +58,6 @@ const router = createRouter({
   routeTree: root.addChildren([overview, waivers, live, lineup, league, team, players, model]),
   context: { queryClient },
   defaultPreload: "intent",
-  defaultViewTransition: true,
   defaultPreloadStaleTime: 0,
   defaultPendingMs: 150,
   defaultPendingComponent: () => <Skeleton className="h-64 w-full" />,

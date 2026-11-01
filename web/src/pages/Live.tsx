@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import clsx from "clsx";
 import { num, pct, q } from "../api";
 import { RiskBadge, TeamAvatar } from "../components/brand";
-import { BarList } from "../components/charts";
+import { ChopLine } from "../components/charts";
 import { Card, ErrorBox, PageHeader, Skeleton, Stat, Td, Th } from "../components/ui";
 
 export default function Live() {
@@ -41,18 +41,31 @@ export default function Live() {
             </div>
           </Card>
 
-          <Card title="Chance of the lowest score" sub="Tap a team for its roster">
-            <BarList
-              rows={d.teams.map((t) => ({
-                key: t.team_id,
-                label: t.name,
-                value: t.p_chop,
-                highlight: t.is_me,
-                icon: <TeamAvatar src={t.avatar} name={t.name} size={24} />,
-                badge: <RiskBadge p={t.p_chop} compact />,
-                detail: <>{num(t.current)} now · ~{num(t.final_mean, 0)} final · {pct(t.share_left, 0)} of games left</>,
-              }))}
-              fmt={(v) => pct(v)}
+          <Card
+            title="The chop line"
+            sub="Where each team is likely to finish; the lowest score is chopped. Tap a team for its roster."
+          >
+            <ChopLine
+              line={d.chop_line}
+              rows={[...d.teams]
+                .sort((a, b) => a.final_mean - b.final_mean)
+                .map((t) => ({
+                  key: t.team_id,
+                  label: t.name,
+                  icon: <TeamAvatar src={t.avatar} name={t.name} size={24} />,
+                  highlight: t.is_me,
+                  low: t.final_p10,
+                  mid: t.final_mean,
+                  high: t.final_p90,
+                  now: t.current,
+                  right: <>{pct(t.p_chop)}<RiskBadge p={t.p_chop} compact /></>,
+                  detail: (
+                    <>
+                      {num(t.current)} now · ~{num(t.final_mean, 0)} final ({num(t.final_p10, 0)}–{num(t.final_p90, 0)}) ·{" "}
+                      {pct(t.share_left, 0)} of games left
+                    </>
+                  ),
+                }))}
               onSelect={(id) => navigate({ to: "/teams/$teamId", params: { teamId: id } })}
             />
           </Card>

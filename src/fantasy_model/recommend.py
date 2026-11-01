@@ -48,6 +48,18 @@ def future_discount(p_chop: np.ndarray) -> float:
     return float(np.mean([alive[k - 1] * (n - k) / n for k in range(1, n)]))
 
 
+def bid_curve(max_opp_sorted: np.ndarray, faab: int, bid: int, points: int = 40) -> list:
+    """[[bid, P(get)], ...] from $0 to a bit past where the field tops out (for the UI)."""
+    hi = float(np.quantile(max_opp_sorted, 0.95)) * 1.25 if len(max_opp_sorted) else 0.0
+    top = int(min(faab, max(hi, bid * 1.5, 20)))
+    grid = np.unique(np.linspace(0, top, points).round().astype(int))
+    n = len(max_opp_sorted)
+    lt = np.searchsorted(max_opp_sorted, grid, side="left")
+    le = np.searchsorted(max_opp_sorted, grid, side="right")
+    p = (lt + 0.5 * (le - lt)) / n
+    return [[float(g), round(float(x), 4)] for g, x in zip(grid, p, strict=True)]
+
+
 def best_bid(max_opp_sorted: np.ndarray, d_p_win: float, lam: float, faab: int, deny_sorted=None):
     """Bid in [0, faab] maximizing P(get | b) * (d_p_win - lam * b) + denial(b). Ties count half.
     deny_sorted: per-sim loss to our P(win) if that sim's top rival bidder gets the player,
@@ -219,7 +231,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
 
     # Denial: for the most valuable candidates, who would win him if we don't, and what that
     # rival's gain costs our P(win). Ordered by standalone value so the costly sims stay few.
-    deny = {}
+    deny, rival = {}, {}
     order = gains.sort("d_p_win", descending=True)["player_id"].head(PLAN_POOL).to_list()
     for pid in order:
         mx, who = bids.max_opponent_bids(model, qual.get(pid), opp, return_winner=True)
@@ -235,6 +247,10 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
             )
             loss[k] = max(-d["d_p_win_all"][me_i], 0.0)
         per_sim = np.where(who >= 0, loss[np.maximum(who, 0)], 0.0)
+        shares = np.bincount(who[who >= 0], minlength=len(opp)) / len(who)
+        if shares.max() > 0:
+            k = int(shares.argmax())
+            rival[pid] = (ctx.names.get(opp[k][0], opp[k][0]), float(shares[k]))
         o = np.argsort(PRICE_BUMP * mx, kind="stable")
         dist[pid] = PRICE_BUMP * mx
         deny[pid] = (o, per_sim[o])
@@ -244,6 +260,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         mx = np.sort(dist[r["player_id"]])
         dn = deny.get(r["player_id"])
         b, p_get, ev = best_bid(mx, r["d_p_win"], lam, my_faab, dn[1] if dn else None)
+        rv = rival.get(r["player_id"])
         rows.append(
             {
                 "player": r["full_name"],
@@ -259,6 +276,9 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
                 "market_median": float(np.median(mx)),
                 "drop": r["drop_name"],
                 "player_id": r["player_id"],
+                "rival": rv[0] if rv else None,
+                "rival_p": rv[1] if rv else None,
+                "curve": bid_curve(mx, my_faab, b),
             }
         )
     sheet = pl.DataFrame(rows).filter(pl.col("bid") > 0).sort("ev", descending=True)
