@@ -338,6 +338,25 @@ def create_app() -> FastAPI:
     def players():
         return versioned("players", compute_players)
 
+    live_cache: dict = {}
+
+    @app.get("/api/live")
+    def live_ep():
+        """In-game chop odds. Not tied to data versions: cached 30 s to keep polling cheap."""
+        hit = live_cache.get("v")
+        if hit and time.time() - hit[0] < 30:
+            return hit[1]
+        from fantasy_model import live
+
+        con = connect()
+        try:
+            out = live.live_odds(con, recommend.load_context(con, PLATFORM, league_id()))
+        finally:
+            con.close()
+        out["fetched_at"] = time.time()
+        live_cache["v"] = (time.time(), out)
+        return out
+
     @app.get("/api/lineup")
     def lineup_ep(week: int | None = None, team: str | None = None):
         def run(con, lid, week, team):
