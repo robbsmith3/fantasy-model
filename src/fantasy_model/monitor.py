@@ -21,7 +21,9 @@ MAX_GAP = {
     "pre_waiver": timedelta(days=8),
     "post_waiver": timedelta(days=8),
     "backup": timedelta(days=8),
+    "update": timedelta(days=15),  # weekly; a missed week is fine
 }
+OPTIONAL = {"backup", "update"}  # not flagged until they've run once (setup may not include them)
 
 _TOAST = """
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
@@ -95,7 +97,7 @@ def alerts(con, now: datetime | None = None) -> list[dict]:
     for job, gap in MAX_GAP.items():
         success = last_success.get(job)
         if success is None:
-            if job in last_ok or job != "backup":  # backup may simply not have run yet
+            if job in last_ok or job not in OPTIONAL:
                 msg = f"No successful {_label(job)} run yet."
                 out.append({"level": "warning", "job": job, "message": msg})
             continue
