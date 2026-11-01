@@ -313,7 +313,9 @@ def compute_player(con, lid: str, pid: str) -> dict:
     ctx = recommend.load_context(con, PLATFORM, lid)
     first = ctx.week if ctx.chop_pending else ctx.week + 1
     weeks = list(range(first, first + 4))
-    vals = fit.adjust_for_injury(value.player_values(con, PLATFORM, lid, weeks), weeks)
+    vals = fit.adjust_for_injury(
+        value.player_values(con, PLATFORM, lid, weeks), weeks, fit.status_week(con, ctx.season)
+    )
     row = vals.filter(pl.col("player_id") == pid)
     if row.is_empty():
         raise HTTPException(404, f"no projection for player {pid}")

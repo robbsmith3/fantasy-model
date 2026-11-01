@@ -61,7 +61,9 @@ def live_odds(con, ctx, n_sims: int = 20000, scoreboard: dict | None = None) -> 
     left = remaining_share(sb)
 
     vals = fit.adjust_for_injury(
-        value.player_values(con, ctx.platform, ctx.league_id, [week]), [week]
+        value.player_values(con, ctx.platform, ctx.league_id, [week]),
+        [week],
+        fit.status_week(con, ctx.season),
     ).rename({f"pts_w{week}": "mu"})
     meta = {r[0]: r[1:] for r in vals.select("player_id", "position", "nfl_team", "mu").iter_rows()}
 

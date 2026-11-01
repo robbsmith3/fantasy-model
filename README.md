@@ -92,7 +92,7 @@ powershell -ExecutionPolicy Bypass -File \\wsl.localhost\Ubuntu-24.04\home\<you>
 | `daily` | 9am Mon–Wed, Fri–Sat | injury status, practice reports, depth charts |
 | `pre_waiver` | Tue 8pm | rosters, FAAB, scores, projections (Sleeper, ESPN, FantasyPros, our model) |
 | `post_waiver` | Wed 9am | winning *and losing* bids, then the weekly report card |
-| `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections and player status |
+| `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections, player status, betting props |
 | `history` | Tue 10am | current-season nflverse stats, snaps, schedules |
 
 Set `pre_waiver` and `post_waiver` to bracket your league's waiver run.
@@ -117,6 +117,7 @@ uv run ffm review                                            # weekly report car
 uv run ffm serve                                             # web app
 uv run ffm health                                            # recent jobs and failures
 uv run ffm backup                                            # zip data + config, verify
+uv run ffm injury-curves                                     # where injury discounts come from
 uv run ffm --help                                            # everything else
 ```
 
@@ -166,6 +167,9 @@ backtest only uses data from before the week it predicts.
 - **[nflverse](https://nflverse.nflverse.com/):** player stats, snap counts, schedules and betting
   lines, injury reports, expected fantasy points (ffopportunity), and FantasyPros consensus
   rankings and projections.
+- **[The Odds API](https://the-odds-api.com/):** NFL player props (yards, receptions, TDs),
+  saved before kickoff; free plan. Being collected for testing, not yet in the consensus. Needs a
+  key in `~/.config/fantasy-model/odds-api.key` (or `$ODDS_API_KEY`).
 - **Yahoo Fantasy:** awaiting API access. Screens showing Yahoo data will carry "Fantasy data
   provided by Yahoo Fantasy" as Yahoo requires.
 
@@ -192,8 +196,8 @@ Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLO
 - `ffm serve` listens on `127.0.0.1` only and has no login. Keep it that way: don't bind it to
   `0.0.0.0` or forward its port, or anyone on the network could read your league data.
 - No credentials live in this repo. League ids are in the git-ignored `config/leagues.toml`;
-  Yahoo's client id and secret are 1Password references (`config/yahoo.env`); the OAuth token is
-  stored outside the repo with owner-only permissions.
+  Yahoo's client id and secret are 1Password references (`config/yahoo.env`); the OAuth token and
+  the Odds API key are stored outside the repo with owner-only permissions.
 - Collected data (`data/`) and logs (`logs/`) are git-ignored.
 - The server only answers requests addressed to `127.0.0.1`/`localhost` (a guard against
   DNS rebinding, where a hostile web page points its own domain at your machine).
