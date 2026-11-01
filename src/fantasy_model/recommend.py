@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import polars as pl
 
-from fantasy_model import bids, fit, survival, value
+from fantasy_model import bids, dynamics, fit, survival, value
 
 # Was 1.15 to offset underpricing; with per-team effects the backtest median bias is -$24 and any
 # scale-up worsens CRPS (1.0: 96.7, 1.15: 102.7), so no bump.
@@ -122,6 +122,9 @@ class LeagueState:
     sigma: float
     noise: np.ndarray
     base: dict  # survival.simulate output
+    model: dict  # bid model
+    quality: dict  # bid-model quality per player
+    dumps: dict  # rivals' gains/spend from future chops (dynamics.dump_matrices)
     me_i: int
     start: int  # first mu column a pickup from this run affects
 
@@ -148,20 +151,30 @@ def league_state(con, ctx: Context, assume_chop: str | None = None) -> LeagueSta
             for t in ctx.alive
         ]
     )
-    mu = survival.extend_horizon(proj, len(ctx.alive) - 1)
+    gain_weeks = list(range(first, first + 4))
+    model = bids.fit(
+        bids.bid_table(con, ctx.platform, ctx.league_id, ctx.season),
+        bids.alive_by_leg(con, ctx.platform, ctx.league_id, ctx.season),
+    )
+    quality = bids.current_quality(con, ctx.season, ctx.week)
+    dumps = dynamics.dump_matrices(vals, ctx, gain_weeks, model, quality)
+    mu = survival.extend_horizon(proj, len(ctx.alive) - 1) + dumps["now"][:, None]
     sigma = survival.score_sigma(con, ctx.platform, ctx.league_id, ctx.week - 1)
     noise = survival.common_noise(len(ctx.alive), mu.shape[1])
     return LeagueState(
         vals=vals,
         sim_weeks=sim_weeks,
-        gain_weeks=list(range(first, first + 4)),
+        gain_weeks=gain_weeks,
         proj=proj,
         mu=mu,
         sigma=sigma,
         noise=noise,
-        base=survival.simulate(mu, sigma, noise=noise),
+        base=survival.simulate(mu, sigma, noise=noise, dumps=dumps),
         me_i=ctx.alive.index(ctx.me),
         start=1 if ctx.chop_pending else 0,
+        model=model,
+        quality=quality,
+        dumps=dumps,
     )
 
 
@@ -169,25 +182,21 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     """Returns {'summary', 'sheet', 'plan'} for the next waiver run."""
     st = league_state(con, ctx, assume_chop)
     vals, gain_weeks, mu, sigma = st.vals, st.gain_weeks, st.mu, st.sigma
-    noise, base, me_i, start = st.noise, st.base, st.me_i, st.start
+    noise, base, me_i, start, dumps = st.noise, st.base, st.me_i, st.start, st.dumps
 
     # Lineup gain per candidate, then league-win gain.
     gains = fit.roster_gain(vals, ctx.me, ctx.slots, gain_weeks, candidates=candidates)
     gains = gains.filter(pl.col("gain") > 0)
     d_win = [
         survival.pickup_delta(
-            mu, me_i, np.array([r[f"gain_w{w}"] for w in gain_weeks]), sigma, noise, start
+            mu, me_i, np.array([r[f"gain_w{w}"] for w in gain_weeks]), sigma, noise, start, dumps
         )["d_p_win"]
         for r in gains.iter_rows(named=True)
     ]
     gains = gains.with_columns(pl.Series("d_p_win", d_win))
 
     # Opponent max-bid distributions.
-    model = bids.fit(
-        bids.bid_table(con, ctx.platform, ctx.league_id, ctx.season),
-        bids.alive_by_leg(con, ctx.platform, ctx.league_id, ctx.season),
-    )
-    qual = bids.current_quality(con, ctx.season, ctx.week)
+    model, qual = st.model, st.quality
     opp = [(t, ctx.faab[t], 0.5) for t in ctx.alive if t != ctx.me]
     my_faab = ctx.faab[ctx.me]
     dist = {
@@ -221,7 +230,9 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
             g_t, _ = fit.claim_gain(vals, t, ctx.slots, gain_weeks, pid)
             if sum(g_t) <= 0:
                 continue
-            d = survival.pickup_delta(mu, ctx.alive.index(t), np.array(g_t), sigma, noise, start)
+            d = survival.pickup_delta(
+                mu, ctx.alive.index(t), np.array(g_t), sigma, noise, start, dumps
+            )
             loss[k] = max(-d["d_p_win_all"][me_i], 0.0)
         per_sim = np.where(who >= 0, loss[np.maximum(who, 0)], 0.0)
         o = np.argsort(PRICE_BUMP * mx, kind="stable")
@@ -256,7 +267,20 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         (pl.col("pos") != "DEF") | (pl.col("pos").cum_count().over("pos") <= MAX_DEF)
     )
     plan = claim_plan(
-        sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, my_faab, deny
+        sheet,
+        vals,
+        ctx,
+        gain_weeks,
+        mu,
+        me_i,
+        sigma,
+        noise,
+        start,
+        dist,
+        lam,
+        my_faab,
+        deny,
+        st_dumps=dumps,
     )
     return {
         "plan": plan,
@@ -278,7 +302,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
 
 def claim_plan(
     sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, faab, deny=None,
-    max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL,
+    max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL, st_dumps=None,
 ) -> pl.DataFrame:  # fmt: skip
     """Greedy joint plan. Each step re-values every remaining candidate given the claims already
     chosen: averaged over which of them win (their P(get)), using the roster those wins produce,
@@ -311,7 +335,9 @@ def claim_plan(
                     span = mu.shape[1] - start
                     g = np.concatenate([g, np.full(max(span - len(g), 0), g.mean())])[:span]
                     bumped[me_i, start:] += g
-                d = survival.pickup_delta(bumped, me_i, np.array(gains), sigma, noise, start)
+                d = survival.pickup_delta(
+                    bumped, me_i, np.array(gains), sigma, noise, start, st_dumps
+                )
                 d_win += prob * d["d_p_win"]
             dn = (deny or {}).get(pid)
             b, p_get, ev = best_bid(np.sort(dist[pid]), d_win, lam, budget, dn[1] if dn else None)

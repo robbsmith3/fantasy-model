@@ -38,9 +38,13 @@ def simulate(
     seed: int = 0,
     noise: np.ndarray | None = None,
     drift: bool = True,
+    dumps: dict | None = None,
 ) -> dict[str, np.ndarray]:
     """Play out the chops. mu: (teams, weeks) projected scores, one column per remaining chop.
     Column 0 is the nearest week; with `drift`, later columns get a team-strength random walk.
+    dumps (dynamics.dump_matrices): when team c is chopped, team t's weekly score rises by
+    D[c, t] for the rest of the season (it won some of c's players), paying S[c, t] from a FAAB
+    balance tracked per simulated season; a team that can't afford it all gets that fraction.
 
     Returns per-team arrays: p_chop (teams, weeks) = P(eliminated that week), p_win, exp_weeks
     (expected chops survived). Pass the same `noise` (n_sims, teams, weeks) to compare scenarios
@@ -58,11 +62,24 @@ def simulate(
     alive = np.ones((noise.shape[0], n_teams), dtype=bool)
     chop_week = np.full((noise.shape[0], n_teams), n_weeks)  # n_weeks = never chopped
     rows = np.arange(noise.shape[0])
+    if dumps is not None:
+        faab = np.tile(dumps["faab"], (noise.shape[0], 1))
     for w in range(n_weeks):
         still = alive.sum(axis=1) > 1
         loser = np.where(alive, scores[:, :, w], np.inf).argmin(axis=1)
         alive[rows[still], loser[still]] = False
         chop_week[rows[still], loser[still]] = w
+        if dumps is not None and w + 1 < n_weeks:
+            d, sp = (
+                (dumps["first"], dumps["spend_first"])
+                if w == 0
+                else (dumps["rest"], dumps["spend_rest"])
+            )
+            r = rows[still]
+            need = sp[loser[r]]
+            frac = np.where(need > 0, np.clip(faab[r] / np.maximum(need, 1e-9), 0, 1), 1.0)
+            faab[r] -= need * frac
+            scores[r, :, w + 1 :] += (d[loser[r]] * frac)[:, :, None]
     p_chop = np.stack([(chop_week == w).mean(axis=0) for w in range(n_weeks)], axis=1)
     return {
         "p_chop": p_chop,
@@ -90,6 +107,7 @@ def pickup_delta(
     sigma: float,
     noise: np.ndarray,
     start: int = 1,
+    dumps: dict | None = None,
 ) -> dict[str, float]:
     """Change in one team's P(win) and expected chops survived if its scores rise by `gains`
     (projected weeks, extended by their mean) from week index `start` on. Same noise both runs."""
@@ -97,10 +115,10 @@ def pickup_delta(
     span = n_weeks - start
     g = np.asarray(gains, dtype=float)
     g = g[:span] if len(g) >= span else np.concatenate([g, np.full(span - len(g), g.mean())])
-    base = simulate(mu, sigma, noise=noise)
+    base = simulate(mu, sigma, noise=noise, dumps=dumps)
     bumped = mu.copy()
     bumped[team_idx, start:] += g
-    new = simulate(bumped, sigma, noise=noise)
+    new = simulate(bumped, sigma, noise=noise, dumps=dumps)
     return {
         "d_p_win": float(new["p_win"][team_idx] - base["p_win"][team_idx]),
         "d_exp_weeks": float(new["exp_weeks"][team_idx] - base["exp_weeks"][team_idx]),
