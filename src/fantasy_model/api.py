@@ -149,9 +149,26 @@ def team_avatars(con, lid: str) -> dict[str, str]:
     return {t: by_user[o] for t, o in owners if o in by_user}
 
 
+def waiver_window(last_processed, now, tz):
+    """(cutoff, processed) for the waiver run that matters now.
+
+    Claims lock at the run's scheduled hour and results land a few minutes later (our league:
+    cutoff 3:00 am ET / 2:00 am CT, processed ~3:08 ET). The data only has the processed time,
+    so the cutoff is that time rounded down to the hour. Weeks step in local wall time (DST-safe)
+    and a run stays current until it has processed, so 2:00-2:08 reads as "processing"."""
+    from datetime import timedelta
+
+    done = last_processed.astimezone(tz).replace(second=0, microsecond=0, tzinfo=None)
+    cutoff = done.replace(minute=0)
+    lag = done - cutoff
+    while (cutoff + lag).replace(tzinfo=tz) <= now:
+        cutoff += timedelta(days=7)
+    return cutoff.replace(tzinfo=tz), (cutoff + lag).replace(tzinfo=tz)
+
+
 def compute_timeline(con, lid: str) -> dict:
-    """Next deadlines: the main waiver run (anchored on the last big run, +7 days until future),
-    the next kickoff (lineups start locking) and the first Sunday kickoff. ISO UTC strings."""
+    """Next deadlines: waiver claims cutoff and processing time, the next kickoff (lineups start
+    locking) and the first Sunday kickoff. ISO UTC strings."""
     from datetime import UTC, datetime, timedelta
     from zoneinfo import ZoneInfo
 
@@ -163,14 +180,9 @@ def compute_timeline(con, lid: str) -> dict:
         [PLATFORM, lid],
     ).fetchall()
     et = ZoneInfo("America/New_York")
-    waiver = None
+    cutoff = processed = None
     if last:
-        # Step a week at a time in Eastern wall-clock time (runs were ~3:08 am ET), so the
-        # estimate stays right across a daylight-saving change.
-        t = last[0][0].astimezone(et).replace(second=0, microsecond=0, tzinfo=None)
-        while t.replace(tzinfo=et) <= now:
-            t += timedelta(days=7)
-        waiver = t.replace(tzinfo=et).astimezone(UTC)
+        cutoff, processed = waiver_window(last[0][0], now, et)
     games = con.execute(
         """SELECT week, gameday, gametime, weekday FROM nfl_schedules
            WHERE game_type = 'REG' AND gameday >= ? ORDER BY gameday, gametime""",
@@ -188,7 +200,9 @@ def compute_timeline(con, lid: str) -> dict:
     iso = lambda d: d.isoformat() if d else None  # noqa: E731
     return {
         "now": iso(now),
-        "next_waiver": iso(waiver),
+        "waiver_cutoff": iso(cutoff.astimezone(UTC)) if cutoff else None,
+        "waiver_processed": iso(processed.astimezone(UTC)) if processed else None,
+        "waiver_processing": bool(cutoff and cutoff <= now < processed),
         "next_kickoff": iso(next_kick[1]) if next_kick else None,
         "next_kickoff_week": next_kick[0] if next_kick else None,
         "sunday_main": iso(sunday[1]) if sunday else None,

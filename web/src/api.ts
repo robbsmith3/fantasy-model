@@ -135,7 +135,9 @@ export type Live = {
 };
 export type Timeline = {
   now: string;
-  next_waiver: string | null;
+  waiver_cutoff: string | null; // claims lock (e.g. Wed 2:00 AM CT)
+  waiver_processed: string | null; // results land a few minutes later (~2:08)
+  waiver_processing: boolean; // between the two
   next_kickoff: string | null;
   next_kickoff_week: number | null;
   sunday_main: string | null;
