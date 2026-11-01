@@ -6,6 +6,7 @@ export type Team = {
   name: string;
   owner: string | null;
   is_me: boolean;
+  avatar: string | null;
   alive: boolean;
   faab: number | null;
   chopped_week: number | null;
@@ -37,6 +38,7 @@ export type RosterPlayer = {
 export type TeamDetail = {
   team_id: string;
   name: string;
+  avatar: string | null;
   is_me: boolean;
   weeks: number[];
   players: RosterPlayer[];
@@ -111,6 +113,7 @@ export type Lineup = {
 export type LiveTeam = {
   team_id: string;
   name: string;
+  avatar: string | null;
   is_me: boolean;
   current: number;
   final_mean: number;
@@ -124,6 +127,13 @@ export type Live = {
   games: { pre: number; live: number; final: number };
   teams: LiveTeam[];
   fetched_at: number;
+};
+export type Timeline = {
+  now: string;
+  next_waiver: string | null;
+  next_kickoff: string | null;
+  next_kickoff_week: number | null;
+  sunday_main: string | null;
 };
 export type Metrics = Record<string, number | string | null>;
 export type ModelReport = {
@@ -160,6 +170,8 @@ const MIN = 60_000;
 // Snapshot-derived data only changes after a scheduled job, so it stays fresh for minutes.
 export const q = {
   meta: () => queryOptions({ queryKey: ["meta"], queryFn: () => get<Meta>("/api/meta"), staleTime: MIN }),
+  timeline: () =>
+    queryOptions({ queryKey: ["timeline"], queryFn: () => get<Timeline>("/api/timeline"), staleTime: 10 * MIN }),
   league: () =>
     queryOptions({ queryKey: ["league"], queryFn: () => get<League>("/api/league"), staleTime: 5 * MIN }),
   team: (id: string) =>

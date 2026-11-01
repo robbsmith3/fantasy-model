@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-qu
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import clsx from "clsx";
 import { money, num, pct, q } from "../api";
+import { PlayerHead } from "../components/brand";
 import { Card, Computing, ErrorBox, InjuryBadge, PageHeader, Pos, Stat, Td, Th } from "../components/ui";
 
 export default function Waivers() {
@@ -71,7 +72,7 @@ export default function Waivers() {
                     {ready.plan.map((p) => (
                       <tr key={p.player_id}>
                         <Td className="text-muted">{p.order}</Td>
-                        <Td><Pos pos={p.pos} />{p.player}</Td>
+                        <Td><span className="flex items-center gap-2.5"><PlayerHead id={p.player_id} name={p.player} size={30} /><span><span className="font-medium">{p.player}</span> <span className="text-xs text-muted">{p.pos}</span></span></span></Td>
                         <Td right className="font-semibold">{money(p.bid)}</Td>
                         <Td right>{pct(p.p_get, 0)}</Td>
                         <Td right>{pct(p.d_p_win, 2)}</Td>
@@ -96,7 +97,7 @@ export default function Waivers() {
                 <tbody className="divide-y divide-line">
                   {ready.sheet.map((r) => (
                     <tr key={r.player_id} className="hover:bg-surface-2">
-                      <Td><Pos pos={r.pos} />{r.player}<InjuryBadge status={r.injury} /></Td>
+                      <Td><span className="flex items-center gap-2.5"><PlayerHead id={r.player_id} name={r.player} size={28} /><span><Pos pos={r.pos} />{r.player}<InjuryBadge status={r.injury} /></span></span></Td>
                       <Td right>{num(r.pts_gain)}</Td>
                       <Td right>{pct(r.d_p_win, 2)}</Td>
                       <Td right className="text-ink-2">{pct(r.deny, 2)}</Td>

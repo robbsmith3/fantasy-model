@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
 
 /* Design tokens. Chart/ink values from the dataviz reference palette; dark is its own selected
    steps, not an inversion. Theme: OS preference, overridden by html[data-theme]. */
@@ -20,6 +21,12 @@
   --good-text: #006300;
   --warning: #fab219;
   --critical: #d03b3b;
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 4px 16px rgba(11, 11, 11, 0.04);
+  --glow: radial-gradient(120% 90% at 0% 0%, rgba(42, 120, 214, 0.1), transparent 60%);
+  --good-wash: rgba(12, 163, 12, 0.1);
+  --warning-wash: rgba(250, 178, 25, 0.14);
+  --critical-wash: rgba(208, 59, 59, 0.1);
+  --warning-text: #8a5a00;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -37,6 +44,12 @@
     --accent-wash: rgba(57, 135, 229, 0.12);
     --neutral-mark: #898781;
     --good-text: #0ca30c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
+    --glow: radial-gradient(120% 90% at 0% 0%, rgba(57, 135, 229, 0.16), transparent 60%);
+    --good-wash: rgba(12, 163, 12, 0.14);
+    --warning-wash: rgba(250, 178, 25, 0.12);
+    --critical-wash: rgba(208, 59, 59, 0.16);
+    --warning-text: #fab219;
   }
 }
 :root[data-theme="dark"] {
@@ -54,6 +67,12 @@
   --accent-wash: rgba(57, 135, 229, 0.12);
   --neutral-mark: #898781;
   --good-text: #0ca30c;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --glow: radial-gradient(120% 90% at 0% 0%, rgba(57, 135, 229, 0.16), transparent 60%);
+  --good-wash: rgba(12, 163, 12, 0.14);
+  --warning-wash: rgba(250, 178, 25, 0.12);
+  --critical-wash: rgba(208, 59, 59, 0.16);
+  --warning-text: #fab219;
 }
 
 @theme inline {
@@ -69,7 +88,11 @@
   --color-good: var(--good-text);
   --color-critical: var(--critical);
   --color-warning: var(--warning);
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-warning-text: var(--warning-text);
+  --color-good-wash: var(--good-wash);
+  --color-warning-wash: var(--warning-wash);
+  --color-critical-wash: var(--critical-wash);
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 html,
@@ -110,4 +133,29 @@ body {
   background-size: 400px 100%;
   animation: shimmer 1.2s linear infinite;
   border-radius: 6px;
+}
+
+.card {
+  box-shadow: var(--shadow);
+}
+.glow {
+  background-image: var(--glow);
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.enter {
+  animation: fade-up 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+/* Route changes cross-fade (TanStack Router defaultViewTransition). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.18s;
 }

@@ -122,6 +122,77 @@ def _state(con, lid: str, assume_chop: str | None = None):
     return ctx, recommend.league_state(con, ctx, assume_chop)
 
 
+def team_avatars(con, lid: str) -> dict[str, str]:
+    """{team_id: image URL}: the team's custom avatar, else the manager's Sleeper avatar.
+    From the newest stored league.users payload (no schema change, no extra request)."""
+    import json
+
+    raw = con.execute(
+        """SELECT body FROM raw_response WHERE platform = ? AND endpoint = 'league.users'
+           AND url LIKE ? ORDER BY fetched_at DESC LIMIT 1""",
+        [PLATFORM, f"%/league/{lid}/users%"],
+    ).fetchall()
+    body = raw[0][0] if raw else []
+    users = json.loads(body) if isinstance(body, str) else body
+    by_user = {}
+    for u in users or []:
+        custom = (u.get("metadata") or {}).get("avatar")
+        if custom:
+            by_user[u["user_id"]] = custom
+        elif u.get("avatar"):
+            by_user[u["user_id"]] = f"https://sleepercdn.com/avatars/thumb/{u['avatar']}"
+    owners = con.execute(
+        "SELECT team_id, owner_id FROM team WHERE platform = ? AND league_id = ?", [PLATFORM, lid]
+    ).fetchall()
+    return {t: by_user[o] for t, o in owners if o in by_user}
+
+
+def compute_timeline(con, lid: str) -> dict:
+    """Next deadlines: the main waiver run (anchored on the last big run, +7 days until future),
+    the next kickoff (lineups start locking) and the first Sunday kickoff. ISO UTC strings."""
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(UTC)
+    last = con.execute(
+        """SELECT processed_at FROM (SELECT processed_at, count(*) n FROM txn
+           WHERE platform = ? AND league_id = ? AND type = 'waiver' GROUP BY 1)
+           WHERE n >= 10 ORDER BY processed_at DESC LIMIT 1""",
+        [PLATFORM, lid],
+    ).fetchall()
+    et = ZoneInfo("America/New_York")
+    waiver = None
+    if last:
+        # Step a week at a time in Eastern wall-clock time (runs were ~3:08 am ET), so the
+        # estimate stays right across a daylight-saving change.
+        t = last[0][0].astimezone(et).replace(second=0, microsecond=0, tzinfo=None)
+        while t.replace(tzinfo=et) <= now:
+            t += timedelta(days=7)
+        waiver = t.replace(tzinfo=et).astimezone(UTC)
+    games = con.execute(
+        """SELECT week, gameday, gametime, weekday FROM nfl_schedules
+           WHERE game_type = 'REG' AND gameday >= ? ORDER BY gameday, gametime""",
+        [(now - timedelta(days=1)).date().isoformat()],
+    ).fetchall()
+    kicks = []
+    for wk, day, hhmm, weekday in games:
+        if not hhmm:
+            continue
+        k = datetime.fromisoformat(f"{day}T{hhmm}").replace(tzinfo=et).astimezone(UTC)
+        if k > now:
+            kicks.append((wk, k, weekday))
+    next_kick = kicks[0] if kicks else None
+    sunday = next((k for k in kicks if k[2] == "Sunday" and k[1].astimezone(et).hour >= 12), None)
+    iso = lambda d: d.isoformat() if d else None  # noqa: E731
+    return {
+        "now": iso(now),
+        "next_waiver": iso(waiver),
+        "next_kickoff": iso(next_kick[1]) if next_kick else None,
+        "next_kickoff_week": next_kick[0] if next_kick else None,
+        "sunday_main": iso(sunday[1]) if sunday else None,
+    }
+
+
 def compute_league(con, lid: str) -> dict:
     ctx, st = _state(con, lid)
     base = st.base
@@ -148,6 +219,7 @@ def compute_league(con, lid: str) -> dict:
             [PLATFORM, lid],
         ).fetchall()
     )
+    avatars = team_avatars(con, lid)
     teams = []
     for t, name in ctx.names.items():
         alive = t in ctx.alive
@@ -158,6 +230,7 @@ def compute_league(con, lid: str) -> dict:
                 "name": name,
                 "owner": owners.get(t),
                 "is_me": t == ctx.me,
+                "avatar": avatars.get(t),
                 "alive": alive,
                 "faab": state.get(t, (None, None))[0],
                 "chopped_week": chopped.get(t),
@@ -207,6 +280,7 @@ def compute_team(con, lid: str, team_id: str) -> dict:
     return {
         "team_id": team_id,
         "name": ctx.names.get(team_id, team_id),
+        "avatar": team_avatars(con, lid).get(team_id),
         "is_me": team_id == ctx.me,
         "weeks": st.sim_weeks,
         "players": players,
@@ -330,6 +404,14 @@ def create_app() -> FastAPI:
     def league():
         return versioned("league", compute_league)
 
+    @app.get("/api/timeline")
+    def timeline():
+        con = connect()
+        try:
+            return compute_timeline(con, league_id())
+        finally:
+            con.close()
+
     @app.get("/api/teams/{team_id}")
     def team(team_id: str):
         return versioned("team", compute_team, team_id)
@@ -350,7 +432,11 @@ def create_app() -> FastAPI:
 
         con = connect()
         try:
-            out = live.live_odds(con, recommend.load_context(con, PLATFORM, league_id()))
+            lid = league_id()
+            out = live.live_odds(con, recommend.load_context(con, PLATFORM, lid))
+            avatars = team_avatars(con, lid)
+            for t in out["teams"]:
+                t["avatar"] = avatars.get(t["team_id"])
         finally:
             con.close()
         out["fetched_at"] = time.time()

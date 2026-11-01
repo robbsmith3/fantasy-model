@@ -1,11 +1,11 @@
 import clsx from "clsx";
 import { type ReactNode, useEffect, useState } from "react";
 
-export function PageHeader({ title, sub, right }: { title: string; sub?: ReactNode; right?: ReactNode }) {
+export function PageHeader({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-[28px] font-semibold tracking-[-0.02em]">{title}</h1>
         {sub && <p className="mt-1 text-sm text-ink-2">{sub}</p>}
       </div>
       {right}
@@ -13,20 +13,21 @@ export function PageHeader({ title, sub, right }: { title: string; sub?: ReactNo
   );
 }
 
-export function Card({ title, sub, right, children, className, pad = true }: {
+export function Card({ title, sub, right, children, className, pad = true, glow = false }: {
   title?: ReactNode;
   sub?: ReactNode;
   right?: ReactNode;
   children: ReactNode;
   className?: string;
   pad?: boolean;
+  glow?: boolean;
 }) {
   return (
-    <section className={clsx("rounded-xl border border-line bg-surface", className)}>
+    <section className={clsx("card enter rounded-2xl border border-line bg-surface", glow && "glow", className)}>
       {(title || right) && (
         <div className="flex items-start justify-between gap-3 px-5 pt-4">
           <div>
-            {title && <h2 className="text-sm font-semibold">{title}</h2>}
+            {title && <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>}
             {sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}
           </div>
           {right}
@@ -46,7 +47,7 @@ export function Stat({ label, value, hint, hero = false }: {
   return (
     <div className="min-w-0">
       <div className="text-xs text-ink-2">{label}</div>
-      <div className={clsx("mt-1 font-semibold tracking-tight", hero ? "text-5xl" : "text-2xl")}>{value}</div>
+      <div className={clsx("mt-1 font-semibold", hero ? "text-6xl tracking-[-0.04em]" : "text-2xl tracking-tight")}>{value}</div>
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   );

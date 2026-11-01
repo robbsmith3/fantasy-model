@@ -2,6 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import clsx from "clsx";
 import { money, num, pct, q } from "../api";
+import { PlayerHead, RiskBadge, TeamAvatar } from "../components/brand";
 import { Card, InjuryBadge, PageHeader, Pos, Stat, Td, Th } from "../components/ui";
 
 export default function Team() {
@@ -13,14 +14,14 @@ export default function Team() {
   return (
     <>
       <PageHeader
-        title={T.name}
+        title={<span className="flex items-center gap-3"><TeamAvatar src={T.avatar} name={T.name} size={40} />{T.name}</span>}
         sub={<Link to="/league" className="hover:underline">← League</Link>}
       />
       {t && (
         <Card className="mb-4">
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
             <Stat label="Chance to win" value={pct(t.p_win)} />
-            <Stat label="Chop next" value={pct(t.p_chop_next)} />
+            <Stat label="Chop next" value={pct(t.p_chop_next)} hint={<RiskBadge p={t.p_chop_next} />} />
             <Stat label="FAAB" value={money(t.faab)} />
             <Stat label="Expected chops survived" value={num(t.exp_weeks)} />
           </div>
@@ -39,7 +40,7 @@ export default function Team() {
             <tbody className="divide-y divide-line">
               {T.players.map((p) => (
                 <tr key={p.player_id} className="hover:bg-surface-2">
-                  <Td><Pos pos={p.pos} />{p.name}<InjuryBadge status={p.injury} /><span className="ml-1.5 text-xs text-muted">{p.nfl_team}</span></Td>
+                  <Td><span className="flex items-center gap-2.5"><PlayerHead id={p.player_id} name={p.name} size={30} /><span><Pos pos={p.pos} />{p.name}<InjuryBadge status={p.injury} /><span className="ml-1.5 text-xs text-muted">{p.nfl_team}</span></span></span></Td>
                   {T.weeks.map((w) => (
                     <Td key={w} right className={clsx(p.starts.includes(w) ? "font-semibold text-ink" : "text-muted")}>
                       {num(p.pts[String(w)])}

@@ -2,6 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import clsx from "clsx";
 import { money, num, pct, q } from "../api";
+import { RiskBadge, TeamAvatar } from "../components/brand";
 import { BarList } from "../components/charts";
 import { Card, PageHeader, Td, Th } from "../components/ui";
 
@@ -23,6 +24,7 @@ export default function League() {
               label: t.name,
               value: t.p_win,
               highlight: t.is_me,
+              icon: <TeamAvatar src={t.avatar} name={t.name} size={24} />,
               detail: <>FAAB {money(t.faab)} · chop next {pct(t.p_chop_next)}</>,
             }))}
             fmt={(v) => pct(v)}
@@ -42,13 +44,14 @@ export default function League() {
                 {alive.map((t) => (
                   <tr key={t.team_id} className={clsx("hover:bg-surface-2", t.is_me && "bg-accent-wash")}>
                     <Td>
-                      <Link to="/teams/$teamId" params={{ teamId: t.team_id }} className={clsx("hover:underline", t.is_me && "font-semibold")}>
+                      <Link to="/teams/$teamId" params={{ teamId: t.team_id }} className={clsx("flex items-center gap-2.5 hover:underline", t.is_me && "font-semibold")}>
+                        <TeamAvatar src={t.avatar} name={t.name} size={26} />
                         {t.name}
                       </Link>
                     </Td>
                     <Td right>{money(t.faab)}</Td>
                     <Td right>{num(t.proj[next], 0)}</Td>
-                    <Td right>{pct(t.p_chop_next)}</Td>
+                    <Td right><span className="inline-flex items-center gap-2">{pct(t.p_chop_next)}<RiskBadge p={t.p_chop_next} compact /></span></Td>
                     <Td right>{num(t.exp_weeks)}</Td>
                     <Td right className="font-semibold">{pct(t.p_win)}</Td>
                   </tr>
