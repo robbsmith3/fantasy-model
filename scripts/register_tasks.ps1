@@ -9,9 +9,10 @@ $Distro  = "Ubuntu-24.04"
 $Project = "~/code/fantasy-model"
 $Folder  = "\FantasyModel\"
 
-# $Job is the ffm subcommand line, e.g. "run daily" or "history".
-function Register-Snap($Name, $Job, $Trigger) {
+# $Job is the ffm subcommand line, e.g. "run daily" or "history"; $Override replaces the whole command.
+function Register-Snap($Name, $Job, $Trigger, $Override = $null) {
     $cmd = "cd $Project && mkdir -p logs && ~/.local/bin/uv run ffm $Job >> logs/snapshots.log 2>&1"
+    if ($Override) { $cmd = "cd $Project && mkdir -p logs && $Override" }
     $action = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d $Distro -- bash -lc `"$cmd`""
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -MultipleInstances IgnoreNew
@@ -35,6 +36,28 @@ Register-Snap "pre_kickoff_thu" "run pre_kickoff" (New-ScheduledTaskTrigger -Wee
 Register-Snap "pre_kickoff_sun" "run pre_kickoff" (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday   -At 11:30am)
 # history: refresh current season nflverse stats/snaps/schedules after MNF data lands
 Register-Snap "history"     "history"         (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday  -At 10am)
+
+# update: pull changes merged on GitHub (incl. Dependabot), rebuild, test; rolls back on failure
+Register-Snap "update" "" (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Wednesday -At 11am) `
+    "bash scripts/update.sh >> logs/update.log 2>&1"
+
+# site: `ffm serve` at logon, hidden, restarted if it crashes. Stop it with
+#   Stop-ScheduledTask -TaskPath '\FantasyModel\' -TaskName site
+$serve = "cd $Project && mkdir -p logs && ~/.local/bin/uv run ffm serve >> logs/serve.log 2>&1"
+$siteAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -WindowStyle Hidden -Command `"wsl.exe -d $Distro -e bash -lc '$serve'`""
+$siteSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan) `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+try {
+    Register-ScheduledTask -TaskPath $Folder -TaskName "site" -Action $siteAction `
+        -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) `
+        -Settings $siteSettings -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskPath $Folder -TaskName "site"
+    Write-Host "registered $($Folder)site (running now: http://127.0.0.1:8000)"
+} catch {
+    Write-Host "FAILED     $($Folder)site : $($_.Exception.Message)"
+}
 
 Write-Host "`nTest one now:  Start-ScheduledTask -TaskPath '$Folder' -TaskName daily"
 Write-Host "Remove all:    Get-ScheduledTask -TaskPath '$Folder' | Unregister-ScheduledTask -Confirm:`$false"

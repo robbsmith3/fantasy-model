@@ -94,8 +94,17 @@ powershell -ExecutionPolicy Bypass -File \\wsl.localhost\Ubuntu-24.04\home\<you>
 | `post_waiver` | Wed 9am | winning *and losing* bids, then the weekly report card |
 | `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections, player status, betting props |
 | `history` | Tue 10am | current-season nflverse stats, snaps, schedules |
+| `update` | Wed 11am | pulls changes merged on GitHub, rebuilds, tests; rolls back on failure |
+| `site` | at logon | runs `ffm serve` hidden, restarts it if it crashes |
 
 Set `pre_waiver` and `post_waiver` to bracket your league's waiver run.
+
+### Maintenance
+
+Mostly automatic: jobs wake the PC and catch up after it was off, failures raise a Windows
+notification and a banner in the app, and backups are verified. Dependabot opens one grouped
+update PR per ecosystem a month; CI tests it and it merges itself unless it's a major version.
+The weekly `update` task then installs it here. Run `bash scripts/update.sh` to update now.
 
 ## Weekly workflow
 

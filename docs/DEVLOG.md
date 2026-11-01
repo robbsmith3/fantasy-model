@@ -148,6 +148,15 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   also fixed later weeks on the Lineup page, which were treated as the next game.
 - IR/PUP players aren't on injury reports; those curves stay hand-set.
 
+### Low-maintenance automation
+- Dependabot: monthly grouped PRs (uv, npm, GitHub Actions), auto-merged after CI except major
+  versions (needs "Allow auto-merge" and a main-branch rule requiring the CI checks).
+- `scripts/update.sh` (weekly task): fetches over HTTPS (public repo, so no SSH key or unlocked
+  1Password needed), fast-forwards, reinstalls, rebuilds, tests, restarts the site task; any
+  failure resets to the previous commit and alerts. Tested: up to date, update, rollback.
+- Site task at logon (hidden PowerShell -> `wsl.exe -e`; `--` can be stripped by Windows
+  PowerShell 5.1). Keeps WSL running too.
+
 ### Rival lineups: tested, no change
 - The season simulation assumes every team starts its best projected lineup. Checked against
   actual starters, 2026 weeks 1-7 (105 team-weeks, `scripts/experiments/lineup_gap.py`): teams
