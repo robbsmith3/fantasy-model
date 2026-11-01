@@ -297,6 +297,8 @@ def mocked(con, monkeypatch):
     monkeypatch.setattr(fantasypros, "snapshot_projections", lambda con, sid, season: 0)
     # Our model trains on nflverse tables (not in this fixture); tested in test_projection_model.
     monkeypatch.setattr(projection_model, "snapshot_projections", lambda *a: 0)
+    # The weekly review needs nflverse tables too; tested in test_review / test_bids.
+    monkeypatch.setattr(cli, "run_review", lambda *a: "skipped")
     monkeypatch.setattr(yahoo.session, "get", yahoo_get)
     yahoo._save_token(
         {

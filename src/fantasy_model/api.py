@@ -568,6 +568,28 @@ def create_app() -> FastAPI:
         lid = league_id()
         return cache.get_async(key, lambda: compute_model_report(lid))
 
+    @app.get("/api/review")
+    def review_ep():
+        con = connect()
+        try:
+            key = ("review", data_version(con))
+        finally:
+            con.close()
+        lid = league_id()
+
+        def run():
+            from fantasy_model import review
+
+            c = connect()
+            try:
+                season = c.execute("SELECT max(season) FROM snapshot_run").fetchall()[0][0]
+                # Read-only view: grade and show, but leave saving the calibration to the job.
+                return review.build(c, PLATFORM, lid, season, save=False)
+            finally:
+                c.close()
+
+        return cache.get_async(key, run)
+
     @app.post("/api/retry")
     def retry():
         cache.clear_errors()

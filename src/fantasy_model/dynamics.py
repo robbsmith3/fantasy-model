@@ -26,7 +26,13 @@ MIN_GAIN = 0.5  # pts/week: below this a team has no real need, so it isn't a bi
 # Backtest (2026 legs 3-7, 33 contested players, bid model fit on earlier legs only): the
 # top-expected-bid team was the actual winner 12% of the time (in its top 3: 52%; richest team:
 # 3%; uniform: 9%) and its bid was a median 0.69x the actual price, so payments are scaled up.
-PAY_SCALE = 1.45
+PAY_SCALE = 1.45  # default; the weekly review refits it (review.py -> data/calibration.json)
+
+
+def pay_scale() -> float:
+    from fantasy_model.review import load_calibration
+
+    return load_calibration().get("pay_scale") or PAY_SCALE
 
 
 def expected_bid(model: dict, q, team: str, faab: int) -> tuple[float, float]:
@@ -55,6 +61,7 @@ def allocate(
     A team's second pickup from the same dump is valued on top of its first (no double count
     for two players at one position)."""
     left = dict(faab)
+    scale = pay_scale()
     got: dict[str, float] = {}
     spent: dict[str, float] = {}
     adds: dict[str, list[str]] = {}
@@ -68,7 +75,7 @@ def allocate(
             if gain_cache[key] < MIN_GAIN or left.get(t, 0) <= 0:
                 continue
             rank, pay = expected_bid(model, quality.get(pid), t, left[t])
-            pay = min(pay * PAY_SCALE, left[t])
+            pay = min(pay * scale, left[t])
             if rank > 0 and (best is None or rank > best[1]):
                 best = (t, rank, pay, gain_cache[key])
         if best:
