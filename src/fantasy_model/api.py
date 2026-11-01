@@ -338,6 +338,19 @@ def create_app() -> FastAPI:
     def players():
         return versioned("players", compute_players)
 
+    @app.get("/api/lineup")
+    def lineup_ep(week: int | None = None, team: str | None = None):
+        def run(con, lid, week, team):
+            from fantasy_model import lineup
+
+            ctx = recommend.load_context(con, PLATFORM, lid)
+            wk = week or (ctx.week if ctx.chop_pending else ctx.week + 1)
+            out = lineup.optimize(con, ctx, wk, team)
+            out["team_name"] = ctx.names.get(out["team"])
+            return out
+
+        return versioned("lineup", run, week, team)
+
     @app.get("/api/recommend")
     def rec(assume_chop: str | None = None):
         con = connect()

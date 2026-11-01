@@ -21,6 +21,7 @@ Setup / utilities:
   validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
   recommend [--assume-chop TEAM_ID] [--csv PATH]
   serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
+  lineup [--week N] [--team ID] survival lineup: max P(not lowest) vs max points
                                 bid sheet for the next Sleeper waiver run
 """
 
@@ -295,6 +296,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("eval-projections").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
+    lu = sub.add_parser("lineup")
+    lu.add_argument("--week", type=int)
+    lu.add_argument("--team")
     srv = sub.add_parser("serve")
     srv.add_argument("--host", default="127.0.0.1")
     srv.add_argument("--port", type=int, default=8000)
@@ -350,6 +354,26 @@ def main(argv: list[str] | None = None) -> None:
         r = evaluate.sim_validation(con, "sleeper", lg["league_id"], season, a.weeks)
         print(r["weeks"].with_columns(pl.selectors.float().round(3)))
         print({k: round(v, 3) for k, v in r["summary"].items()})
+    elif a.cmd == "lineup":
+        from fantasy_model import lineup, recommend
+
+        lg = config.leagues(config.load_config(), "sleeper")[0]
+        ctx = recommend.load_context(con, "sleeper", lg["league_id"])
+        week = a.week or (ctx.week if ctx.chop_pending else ctx.week + 1)
+        r = lineup.optimize(con, ctx, week, a.team)
+        mp, sv = r["max_points"], r["survival"]
+        print(
+            f"{ctx.names[r['team']]}  |  week {week}  |  safety line (lowest rival) median "
+            f"{r['line_median']}"
+        )
+        print(f"max-points lineup: P(not lowest) {mp['p_safe']:.1%}, projected {mp['mean']}")
+        print(f"survival lineup:   P(not lowest) {sv['p_safe']:.1%}, projected {sv['mean']}")
+        if not r["swaps"]:
+            print("  no change: the max-points lineup is also the safest")
+        for sw in r["swaps"]:
+            print(f"  start {sw['in']}  instead of  {sw['out']}")
+        for x in sv["starters"]:
+            print(f"    {x['pos']:4} {x['name']:24} {x['mu']:5.1f}")
     elif a.cmd == "recommend":
         print_recommendation(con, a.assume_chop, a.csv)
     elif a.cmd == "health":
