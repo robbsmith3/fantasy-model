@@ -181,3 +181,56 @@ def sim_validation(
         "cover80": float(np.mean(cover)),
     }
     return {"weeks": df, "summary": summary}
+
+
+def injury_curves(con, max_k: int = 7, min_ppg: float = 8.0) -> pl.DataFrame:
+    """Where fit.INJURY_AVAIL comes from: for fantasy-relevant players (>= min_ppg over >= 2 earlier
+    games) with a final game status in a week, the share who played their k-th team game from then
+    on (k = 0 is that week's game; byes skipped), and that share relative to healthy players (no
+    status, played their team's previous game). "Played" = any stat line in nflverse."""
+    rows = con.execute(
+        """
+        WITH games AS (
+          SELECT season, week, home_team AS team FROM nfl_schedules WHERE game_type = 'REG'
+          UNION SELECT season, week, away_team FROM nfl_schedules WHERE game_type = 'REG'),
+        st AS (
+          SELECT player_id AS gsis, season, week, fantasy_points_ppr AS pts, team
+          FROM nfl_player_stats
+          WHERE season_type = 'REG' AND position IN ('QB', 'RB', 'WR', 'TE')),
+        pw AS (  -- relevant player x week w; team = team of his latest game before w
+          SELECT g.season, g.week AS wk, s.gsis, arg_max(s.team, s.week) AS team,
+                 max(s.week) AS last_wk
+          FROM st s JOIN (SELECT DISTINCT season, week FROM games) g
+            ON g.season = s.season AND s.week < g.week
+          GROUP BY ALL HAVING count(*) >= 2 AND avg(s.pts) >= ?),
+        tg AS (  -- each team's games in order (gi), with the previous game's week
+          SELECT season, team, week,
+                 row_number() OVER (PARTITION BY season, team ORDER BY week) - 1 AS gi,
+                 lag(week) OVER (PARTITION BY season, team ORDER BY week) AS prev_wk
+          FROM games),
+        rep AS (
+          SELECT pw.*, coalesce(i.report_status, 'Healthy') AS s, t.gi, t.prev_wk
+          FROM pw JOIN tg t ON t.season = pw.season AND t.team = pw.team AND t.week = pw.wk
+          LEFT JOIN (SELECT DISTINCT season, week, gsis_id, report_status FROM nfl_injuries
+                     WHERE game_type = 'REG'
+                       AND report_status IN ('Questionable', 'Doubtful', 'Out')) i
+            ON i.gsis_id = pw.gsis AND i.season = pw.season AND i.week = pw.wk),
+        base AS (SELECT * FROM rep WHERE s <> 'Healthy' OR last_wk = prev_wk),
+        ks AS (SELECT unnest(range(0, ?)) AS k)
+        SELECT s, k, count(*) AS n, round(avg((p.gsis IS NOT NULL)::INT), 3) AS p_play
+        FROM base r CROSS JOIN ks
+        JOIN tg t ON t.season = r.season AND t.team = r.team AND t.gi = r.gi + ks.k
+        LEFT JOIN (SELECT DISTINCT gsis, season, week FROM st) p
+          ON p.gsis = r.gsis AND p.season = r.season AND p.week = t.week
+        GROUP BY ALL ORDER BY s, k
+        """,
+        [min_ppg, max_k],
+    ).fetchall()
+    df = pl.DataFrame(rows, schema=["status", "k", "n", "p_play"], orient="row")
+    healthy = df.filter(pl.col("status") == "Healthy").select("k", pl.col("p_play").alias("h"))
+    return (
+        df.join(healthy, on="k")
+        .with_columns((pl.col("p_play") / pl.col("h")).round(2).alias("vs_healthy"))
+        .drop("h")
+        .sort("status", "k")
+    )

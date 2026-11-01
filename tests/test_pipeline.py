@@ -6,7 +6,7 @@ import time
 import pytest
 from conftest import FakeResp
 
-from fantasy_model import cli, espn, fantasypros, projection_model, sleeper, yahoo
+from fantasy_model import cli, espn, fantasypros, odds, projection_model, sleeper, yahoo
 
 # ---------------------------------------------------------------- Sleeper fixtures
 SLEEPER = {
@@ -295,6 +295,7 @@ def mocked(con, monkeypatch):
     monkeypatch.setattr(espn.session, "get", espn_get)
     # FantasyPros comes from nflverse (network); unit-tested separately in test_sources.
     monkeypatch.setattr(fantasypros, "snapshot_projections", lambda con, sid, season: 0)
+    monkeypatch.setattr(odds, "snapshot_props", lambda *a: 0)
     # Our model trains on nflverse tables (not in this fixture); tested in test_projection_model.
     monkeypatch.setattr(projection_model, "snapshot_projections", lambda *a: 0)
     # The weekly review needs nflverse tables too; tested in test_review / test_bids.

@@ -148,7 +148,9 @@ def league_state(con, ctx: Context, assume_chop: str | None = None) -> LeagueSta
         [ctx.week, *range(first, first + 4)] if ctx.chop_pending else list(range(first, first + 4))
     )
     vals = fit.adjust_for_injury(
-        value.player_values(con, ctx.platform, ctx.league_id, sim_weeks), sim_weeks
+        value.player_values(con, ctx.platform, ctx.league_id, sim_weeks),
+        sim_weeks,
+        fit.status_week(con, ctx.season),
     )
     if assume_chop:  # preview: that roster is released to waivers
         vals = vals.with_columns(

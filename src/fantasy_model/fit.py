@@ -6,6 +6,9 @@ and measure how much it improves with the candidate in (and the cheapest drop ou
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import polars as pl
 
 # Which positions may fill each Sleeper slot. Bench (BN) and IR slots never score.
@@ -22,26 +25,51 @@ SLOT_ELIGIBLE: dict[str, frozenset[str]] = {
     "SUPER_FLEX": frozenset({"QB", "RB", "WR", "TE"}),
 }
 
-# Heuristic availability by weeks-from-now (index 0 = first projected week), per injury status.
-# Projections ignore injury designations, so an IR player still shows a full-week projection.
+# Availability by games after the status was reported (index 0 = the game it was reported for);
+# the last value holds beyond the list. Projections ignore injury designations, so an Out player
+# still shows a full-week projection.
+# Questionable/Doubtful/Out are learned from nflverse injury reports 2018-2026 (`ffm
+# injury-curves`): a fantasy-relevant player's chance of playing, relative to healthy players (who
+# play 96% of their next games). 2018-22 and 2023-26 agree within ~0.05. The old hand-set guesses
+# (Q 0.85; D 0.25 then 0.9; Out 0 then 0.8) had Out and Doubtful players back far too soon.
+# Exception, Questionable at k=0: learned 0.72, but pre-game projections already drop players
+# ruled inactive to 0, and on 2026 weeks 1-7 the remaining Questionable players' consensus was
+# unbiased at 0.85 (bias -0.01 pts; 0.72: -1.46; none: +1.67, n=58). So same-week uses 0.85.
+# IR/PUP players aren't on injury reports, so those stay hand-set.
 INJURY_AVAIL: dict[str, list[float]] = {
-    "Questionable": [0.85],
-    "Doubtful": [0.25, 0.9],
-    "Out": [0.0, 0.8],
-    "IR": [0.0, 0.0, 0.3, 0.5],
-    "PUP": [0.0, 0.0, 0.3, 0.5],
-    "NA": [0.0] * 18,
-    "DNR": [0.0] * 18,
+    "Questionable": [0.85, 0.87, 0.92, 0.94],
+    "Doubtful": [0.0, 0.48, 0.78, 0.83, 0.89, 0.90, 0.95],
+    "Out": [0.0, 0.34, 0.56, 0.72, 0.78, 0.83, 0.85],
+    "IR": [0.0, 0.0, 0.3, 0.5, 1.0],
+    "PUP": [0.0, 0.0, 0.3, 0.5, 1.0],
+    "NA": [0.0],
+    "DNR": [0.0],
 }
+ET = ZoneInfo("America/New_York")
 
 
 def availability(injury_status: str | None, k: int) -> float:
-    curve = INJURY_AVAIL.get(injury_status or "", [])
-    return curve[k] if k < len(curve) else (curve[-1] if curve and curve[-1] == 0.0 else 1.0)
+    curve = INJURY_AVAIL.get(injury_status or "")
+    return curve[min(k, len(curve) - 1)] if curve else 1.0
 
 
-def adjust_for_injury(values: pl.DataFrame, weeks: list[int]) -> pl.DataFrame:
-    """Scale each pts_w<N> by expected availability and recompute ros_pts."""
+def status_week(con, season: int, today: date | None = None) -> int:
+    """The NFL week today's injury statuses describe. Game designations come out on Friday and
+    stay until the next week's report, so from Friday (3 days before Monday night) through the
+    following Thursday they belong to that week."""
+    today = today or datetime.now(ET).date()
+    rows = con.execute(
+        "SELECT week, max(gameday) FROM nfl_schedules WHERE season = ? AND game_type = 'REG' "
+        "GROUP BY week",
+        [season],
+    ).fetchall()
+    done = [w for w, last in rows if date.fromisoformat(str(last)) - timedelta(days=3) <= today]
+    return max(done, default=1)
+
+
+def adjust_for_injury(values: pl.DataFrame, weeks: list[int], since: int) -> pl.DataFrame:
+    """Scale each pts_w<N> by availability w - since games after the status (see status_week)
+    and recompute ros_pts."""
     out = values.with_columns(
         pl.struct("injury_status", f"pts_w{w}")
         .map_elements(
@@ -49,7 +77,8 @@ def adjust_for_injury(values: pl.DataFrame, weeks: list[int]) -> pl.DataFrame:
             return_dtype=pl.Float64,
         )
         .alias(f"pts_w{w}")
-        for k, w in enumerate(weeks)
+        for w in weeks
+        for k in [max(w - since, 0)]
     )
     return out.with_columns(pl.sum_horizontal([f"pts_w{w}" for w in weeks]).alias("ros_pts"))
 

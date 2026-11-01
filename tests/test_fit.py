@@ -17,8 +17,37 @@ def test_best_lineup_leaves_slot_empty_when_no_eligible_player():
 
 def test_availability_curves():
     assert fit.availability(None, 0) == 1.0
-    assert fit.availability("Out", 0) == 0.0 and fit.availability("Out", 3) == 1.0
+    assert (
+        fit.availability("Out", 0) == 0.0 < fit.availability("Out", 1) < fit.availability("Out", 3)
+    )
+    assert fit.availability("Out", 50) == fit.INJURY_AVAIL["Out"][-1] < 1.0  # holds the plateau
+    assert fit.availability("IR", 50) == 1.0
     assert fit.availability("NA", 10) == 0.0
+
+
+def test_status_week_turns_over_on_friday_report_day():
+    from datetime import date
+
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute("CREATE TABLE nfl_schedules (season INT, week INT, game_type TEXT, gameday TEXT)")
+    con.execute(
+        "INSERT INTO nfl_schedules VALUES (2026, 8, 'REG', '2026-10-29'), "
+        "(2026, 8, 'REG', '2026-11-02'), (2026, 9, 'REG', '2026-11-05'), "
+        "(2026, 9, 'REG', '2026-11-09')"
+    )
+    assert fit.status_week(con, 2026, date(2026, 11, 2)) == 8  # Monday night: this week's
+    assert fit.status_week(con, 2026, date(2026, 11, 3)) == 8  # Tuesday: still last week's
+    assert fit.status_week(con, 2026, date(2026, 11, 6)) == 9  # Friday: new reports
+
+
+def test_adjust_for_injury_counts_games_from_the_status_week():
+    v = pl.DataFrame({"player_id": ["a"], "injury_status": ["Out"],
+                      "pts_w9": [10.0], "pts_w10": [10.0]})  # fmt: skip
+    out = fit.adjust_for_injury(v, [9, 10], since=8).row(0, named=True)
+    assert out["pts_w9"] == 10 * fit.availability("Out", 1)
+    assert out["pts_w10"] == 10 * fit.availability("Out", 2)
 
 
 def test_roster_gain_counts_bye_cover_and_picks_cheapest_drop():

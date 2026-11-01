@@ -119,6 +119,35 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
 - In the rival-pickup simulation, projected lineup gain stands in for need (rosters change as
   simulated dumps play out).
 
+### Betting props collector (The Odds API)
+- Props may disagree usefully with the projection sites (errors correlate 0.97). Free plan:
+  500 credits/month, cost = markets x games; listing events is free. Six markets (anytime TD,
+  receiving/rushing/passing yards, receptions, passing TDs) for ~16 games is ~96/week, so a
+  quota guard drops low-priority markets before running out.
+- Past props need a paid plan, so there is nothing to backtest yet: `pre_kickoff` saves props for
+  games in the next 36 hours, and they join the consensus only if a backtest on 3-4 collected
+  weeks shows a gain.
+- Stored as Sleeper stat keys: median line across books for yards/receptions; Poisson means from
+  de-vigged probabilities for passing TDs and anytime TD. The key is never stored (URLs saved
+  without it).
+
+### Injury availability learned from data
+- `ffm injury-curves`: fantasy-relevant players (>= 8 PPG) with a final game status, share who
+  played their k-th team game afterwards, relative to healthy players (96% play the next game).
+  nflverse 2018-2026; 2018-22 and 2023-26 agree within ~0.05.
+- Learned (k = 0, 1, 2, ...): Questionable 0.72, 0.87, 0.92, 0.94; Doubtful 0, 0.48, 0.78,
+  0.83, 0.89, 0.90, 0.95; Out 0, 0.34, 0.56, 0.72, 0.78, 0.83, 0.85. Hand-set before: Q 0.85;
+  D 0.25 then 0.9; Out 0 then 0.8. Out and Doubtful players come back far slower than assumed,
+  and some never fully do (plateaus below 1).
+- Same-week Questionable kept at 0.85: pre-game projections already drop players ruled
+  inactive to 0, and on 2026 weeks 1-7 the remaining Questionable players' consensus was
+  unbiased at 0.85 (bias -0.01; 0.72: -1.46; none: +1.67; n=58). Note: mean error is the right
+  check here; MAE rewards the median and so ignores the chance a player sits.
+- Statuses are dated: designations come out Friday and stay until the next report, so k counts
+  from the week today's statuses describe (`fit.status_week`), not from "the next game". This
+  also fixed later weeks on the Lineup page, which were treated as the next game.
+- IR/PUP players aren't on injury reports; those curves stay hand-set.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

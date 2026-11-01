@@ -19,6 +19,7 @@ Setup / utilities:
                                 accuracy of each projection source + consensus vs actual
   backtest-model WEEK [WEEK ...]  walk-forward accuracy of our model vs sources
   validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
+  injury-curves                 chance of playing after Questionable/Doubtful/Out (nflverse)
   recommend [--assume-chop TEAM_ID] [--csv PATH]
                                 bid sheet for the next Sleeper waiver run
   lineup [--week N] [--team ID] survival lineup: max P(not lowest) vs max points
@@ -44,6 +45,7 @@ from fantasy_model import (
     fantasypros,
     monitor,
     nflverse,
+    odds,
     projection_model,
     sleeper,
     yahoo,
@@ -198,6 +200,7 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
         step("espn_proj", espn.snapshot_projections, con, snapshot_id, season, [week])
         step("fp_proj", fantasypros.snapshot_projections, con, snapshot_id, season)
         step("players", sleeper.snapshot_players, con, snapshot_id)
+        step("props", odds.snapshot_props, con, snapshot_id, season, week)
 
     else:
         raise SystemExit(f"unknown job {job!r}; choose from {JOBS}")
@@ -330,6 +333,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("live")
+    sub.add_parser("injury-curves")
     sub.add_parser("review")
     sub.add_parser("backup")
     lu = sub.add_parser("lineup")
@@ -397,6 +401,11 @@ def main(argv: list[str] | None = None) -> None:
         r = evaluate.sim_validation(con, "sleeper", lg["league_id"], season, a.weeks)
         print(r["weeks"].with_columns(pl.selectors.float().round(3)))
         print({k: round(v, 3) for k, v in r["summary"].items()})
+    elif a.cmd == "injury-curves":
+        from fantasy_model import evaluate
+
+        with pl.Config(tbl_rows=40):
+            print(evaluate.injury_curves(con))
     elif a.cmd == "review":
         from fantasy_model import review
 
