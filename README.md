@@ -138,8 +138,6 @@ panel; Waivers → "Copy claims" puts the plan on your clipboard for entering in
 
 **Install as an app.** In Chrome/Edge on this PC, open http://127.0.0.1:8000 and use the install
 icon in the address bar: it gets its own window, icon and offline shell (data is always live).
-On a phone, browsers only install apps (and allow notifications) over HTTPS, so the phone needs
-a secure route to this PC first, e.g. Tailscale (`tailscale serve`) or a Cloudflare tunnel.
 
 The server precomputes league odds, players and the default bid sheet at startup and caches
 everything per data snapshot. While it computes, scheduled jobs wait for the database lock
