@@ -278,7 +278,7 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
             )
         print(f"  total if every claim wins: ${plan['bid'].sum()}")
     if csv:
-        sheet.write_csv(csv)
+        sheet.drop("curve").write_csv(csv)  # nested list column doesn't fit CSV
         print(f"wrote {csv}")
 
 

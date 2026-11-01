@@ -218,3 +218,196 @@ export function BarList({ rows, max, fmt, onSelect }: {
     </ul>
   );
 }
+
+/** P(get the player) vs bid: one series (no legend), area wash, recommended-bid marker,
+    market-median reference line, crosshair tooltip. */
+export function BidCurve({ curve, bid, pGet, median, height = 180 }: {
+  curve: [number, number][];
+  bid: number;
+  pGet: number;
+  median: number;
+  height?: number;
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const m = { t: 14, r: 16, b: 26, l: 40 };
+  const iw = Math.max(width - m.l - m.r, 10);
+  const ih = height - m.t - m.b;
+  const maxX = Math.max(curve[curve.length - 1]?.[0] ?? 1, bid, 1);
+  const sx = (v: number) => m.l + (v / maxX) * iw;
+  const sy = (v: number) => m.t + (1 - v) * ih;
+  const line = curve.map(([x, y], i) => `${i ? "L" : "M"}${sx(x)},${sy(y)}`).join(" ");
+  const area = `${line} L${sx(curve[curve.length - 1][0])},${sy(0)} L${sx(0)},${sy(0)} Z`;
+  const xticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * maxX));
+  const nearest = (px: number) => {
+    const v = ((px - m.l) / iw) * maxX;
+    let best = 0;
+    curve.forEach(([x], i) => {
+      if (Math.abs(x - v) < Math.abs(curve[best][0] - v)) best = i;
+    });
+    return best;
+  };
+  return (
+    <div ref={ref} className="relative w-full">
+      {width > 0 && (
+        <svg width={width} height={height} role="img" aria-label={`Chance to win the claim by bid; recommended $${bid}`}>
+          {[0, 0.5, 1].map((t) => (
+            <g key={t}>
+              <line x1={m.l} x2={m.l + iw} y1={sy(t)} y2={sy(t)} stroke="var(--grid)" />
+              <text x={m.l - 8} y={sy(t)} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--muted)" className="tabular">
+                {Math.round(t * 100)}%
+              </text>
+            </g>
+          ))}
+          {xticks.map((x) => (
+            <text key={x} x={sx(x)} y={height - 6} textAnchor="middle" fontSize={11} fill="var(--muted)" className="tabular">
+              ${x}
+            </text>
+          ))}
+          <path d={area} fill="var(--accent)" opacity={0.1} />
+          <path d={line} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          {median > 0 && median <= maxX && (
+            <g>
+              <line x1={sx(median)} x2={sx(median)} y1={m.t} y2={m.t + ih} stroke="var(--axis)" />
+              <text x={sx(median) + 4} y={m.t + 10} fontSize={11} fill="var(--muted)">market ~${Math.round(median)}</text>
+            </g>
+          )}
+          <circle cx={sx(bid)} cy={sy(pGet)} r={5} fill="var(--accent)" stroke="var(--surface)" strokeWidth={2} />
+          <text x={sx(bid)} y={sy(pGet) - 10} textAnchor={sx(bid) > width - 90 ? "end" : "middle"} fontSize={11} fontWeight={600} fill="var(--ink)">
+            bid ${bid} · {Math.round(pGet * 100)}%
+          </text>
+          {hover != null && (
+            <line x1={sx(curve[hover][0])} x2={sx(curve[hover][0])} y1={m.t} y2={m.t + ih} stroke="var(--axis)" />
+          )}
+          <rect
+            x={m.l}
+            y={m.t}
+            width={iw}
+            height={ih}
+            fill="transparent"
+            onPointerMove={(e) => setHover(nearest(e.clientX - e.currentTarget.getBoundingClientRect().left + m.l))}
+            onPointerLeave={() => setHover(null)}
+          />
+        </svg>
+      )}
+      {hover != null && width > 0 && (
+        <Tooltip x={Math.min(sx(curve[hover][0]) + 12, width - 170)} y={m.t}>
+          <div className="text-xs">
+            <span className="tabular font-semibold text-ink">{Math.round(curve[hover][1] * 100)}%</span>
+            <span className="text-ink-2"> chance at ${curve[hover][0]}</span>
+          </div>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
+export type ChopRow = {
+  key: string;
+  label: ReactNode;
+  icon?: ReactNode;
+  highlight?: boolean;
+  low: number;
+  mid: number;
+  high: number;
+  now: number;
+  right: ReactNode;
+  detail: ReactNode;
+};
+
+/** Each team's likely final-score range on one shared scale, lowest first, with the band
+    where the chopped (lowest) score is likely to land. */
+export function ChopLine({ rows, line, onSelect }: {
+  rows: ChopRow[];
+  line: { p10: number; p50: number; p90: number };
+  onSelect?: (key: string) => void;
+}) {
+  const [hover, setHover] = useState<string | null>(null);
+  // Scale to the finish ranges only. Early in the week "points so far" sits far below them and
+  // would squeeze every range to the right, so a tick below the axis is pinned to its left edge.
+  const lo = Math.max(0, Math.min(line.p10, ...rows.map((r) => r.low)) - 5);
+  const hi = Math.max(line.p90, ...rows.map((r) => r.high)) + 5;
+  const x = (v: number) => `${((v - lo) / (hi - lo)) * 100}%`;
+  const ticks = Array.from({ length: 5 }, (_, i) => Math.round(lo + ((hi - lo) * i) / 4));
+  return (
+    <div>
+      <div className="grid grid-cols-[minmax(0,11rem)_1fr_5.5rem] items-end gap-3 pb-1 text-[11px] text-muted">
+        <span />
+        <div className="relative h-4">
+          {ticks.map((t) => (
+            <span key={t} className="absolute -translate-x-1/2 tabular" style={{ left: x(t) }}>{t}</span>
+          ))}
+        </div>
+        <span className="text-right">chopped</span>
+      </div>
+      <div className="relative">
+        {/* the chop band and line span every row */}
+        <div className="pointer-events-none absolute inset-y-0 grid w-full grid-cols-[minmax(0,11rem)_1fr_5.5rem] gap-3">
+          <span />
+          <div className="relative">
+            <div className="absolute inset-y-0 bg-critical-wash" style={{ left: x(line.p10), width: `calc(${x(line.p90)} - ${x(line.p10)})` }} />
+            <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-critical" style={{ left: x(line.p50) }} />
+          </div>
+          <span />
+        </div>
+        <ul className="relative">
+          {rows.map((r) => (
+            <li key={r.key} className="relative">
+              <button
+                type="button"
+                onClick={() => onSelect?.(r.key)}
+                onPointerEnter={() => setHover(r.key)}
+                onPointerLeave={() => setHover(null)}
+                onFocus={() => setHover(r.key)}
+                onBlur={() => setHover(null)}
+                className={clsx(
+                  "grid w-full grid-cols-[minmax(0,11rem)_1fr_5.5rem] items-center gap-3 rounded-lg py-2 text-left",
+                  onSelect && "cursor-pointer hover:bg-surface-2/60",
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {r.icon}
+                  <span className={clsx("truncate text-sm", r.highlight ? "font-semibold" : "text-ink-2")}>{r.label}</span>
+                </span>
+                <span className="relative h-5">
+                  <span
+                    className="absolute top-1/2 h-2 -translate-y-1/2 rounded-full"
+                    style={{
+                      left: x(r.low),
+                      width: `calc(${x(r.high)} - ${x(r.low)})`,
+                      background: r.highlight ? "var(--accent)" : "var(--neutral-mark)",
+                      opacity: 0.35,
+                    }}
+                  />
+                  {r.now > 0 && (
+                    <span
+                      className={clsx("absolute top-1/2 h-3.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-ink-2", r.now < lo && "opacity-40")}
+                      style={{ left: x(Math.max(r.now, lo)) }}
+                      title={`points so far: ${r.now.toFixed(1)}`}
+                    />
+                  )}
+                  <span
+                    className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-[var(--surface)]"
+                    style={{ left: x(r.mid), background: r.highlight ? "var(--accent)" : "var(--neutral-mark)" }}
+                  />
+                </span>
+                <span className="flex items-center justify-end gap-1.5 text-xs tabular text-ink-2">{r.right}</span>
+              </button>
+              {hover === r.key && (
+                <div className="pointer-events-none absolute left-1/3 top-full z-20 -mt-1 rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-lg">
+                  {r.detail}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-muted">
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2 w-5 rounded-full bg-[var(--neutral-mark)] opacity-40" />likely final (80%)</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full bg-[var(--neutral-mark)]" />expected final</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-3 w-0.5 rounded bg-ink-2" />points so far</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-3 w-0.5 bg-critical" />chop line ≈ {Math.round(line.p50)}</span>
+      </div>
+    </div>
+  );
+}

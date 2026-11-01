@@ -1,7 +1,9 @@
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import clsx from "clsx";
-import { money, num, pct, q } from "../api";
+import { Fragment, useState } from "react";
+import { money, num, pct, q, type SheetRow } from "../api";
+import { BidCurve } from "../components/charts";
 import { PlayerHead } from "../components/brand";
 import { Card, Computing, ErrorBox, InjuryBadge, PageHeader, Pos, Stat, Td, Th } from "../components/ui";
 
@@ -13,6 +15,8 @@ export default function Waivers() {
   const rec = useQuery({ ...q.recommend(chop), placeholderData: keepPreviousData });
   const ready = rec.data?.status === "ready" ? rec.data.data : null;
   const stale = rec.isPlaceholderData || rec.data?.status === "computing";
+  // undefined = default (top candidate explained), null = user closed everything.
+  const [openId, setOpen] = useState<string | null | undefined>(undefined);
   const candidates = L.teams
     .filter((t) => t.alive && !t.is_me)
     .sort((a, b) => (b.p_chop_next ?? 0) - (a.p_chop_next ?? 0));
@@ -86,27 +90,53 @@ export default function Waivers() {
             )}
           </Card>
 
-          <Card title="Every candidate on its own" sub="Lineup points added (next 4 weeks), win probability added, and blocking value (what the rival who’d otherwise win him gains)." pad={false}>
+          <Card title="Every candidate on its own" sub="Tap a row for why: lineup points added (next 4 weeks), win probability added, and blocking value." pad={false}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-line">
-                    <Th>Player</Th><Th right>+pts</Th><Th right>+win</Th><Th right>Block</Th><Th right>Bid</Th><Th right>Chance</Th><Th right>Market median</Th><Th>Drop</Th>
+                    <Th className="w-8" /><Th>Player</Th><Th right>+pts</Th><Th right>+win</Th><Th right>Block</Th><Th right>Bid</Th><Th right>Chance</Th><Th right>Market</Th><Th>Drop</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-line">
-                  {ready.sheet.map((r) => (
-                    <tr key={r.player_id} className="hover:bg-surface-2">
-                      <Td><span className="flex items-center gap-2.5"><PlayerHead id={r.player_id} name={r.player} size={28} /><span><Pos pos={r.pos} />{r.player}<InjuryBadge status={r.injury} /></span></span></Td>
-                      <Td right>{num(r.pts_gain)}</Td>
-                      <Td right>{pct(r.d_p_win, 2)}</Td>
-                      <Td right className="text-ink-2">{pct(r.deny, 2)}</Td>
-                      <Td right className="font-semibold">{money(r.bid)}</Td>
-                      <Td right>{pct(r.p_win_claim, 0)}</Td>
-                      <Td right className="text-ink-2">{money(r.market_median)}</Td>
-                      <Td className="text-ink-2">{r.drop}</Td>
-                    </tr>
-                  ))}
+                <tbody>
+                  {ready.sheet.map((r) => {
+                    const open = openId === undefined ? ready.sheet[0]?.player_id : openId;
+                    const isOpen = open === r.player_id;
+                    return (
+                      <Fragment key={r.player_id}>
+                        <tr
+                          className={clsx("cursor-pointer border-t border-line hover:bg-surface-2", isOpen && "bg-surface-2")}
+                          onClick={() => setOpen(isOpen ? null : r.player_id)}
+                        >
+                          <Td>
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              aria-label={`Why ${money(r.bid)} for ${r.player}?`}
+                              className={clsx("text-muted transition-transform", isOpen && "rotate-90")}
+                            >
+                              ›
+                            </button>
+                          </Td>
+                          <Td><span className="flex items-center gap-2.5"><PlayerHead id={r.player_id} name={r.player} size={28} /><span><Pos pos={r.pos} />{r.player}<InjuryBadge status={r.injury} /></span></span></Td>
+                          <Td right>{num(r.pts_gain)}</Td>
+                          <Td right>{pct(r.d_p_win, 2)}</Td>
+                          <Td right className="text-ink-2">{pct(r.deny, 2)}</Td>
+                          <Td right className="font-semibold">{money(r.bid)}</Td>
+                          <Td right>{pct(r.p_win_claim, 0)}</Td>
+                          <Td right className="text-ink-2">{money(r.market_median)}</Td>
+                          <Td className="text-ink-2">{r.drop}</Td>
+                        </tr>
+                        {isOpen && (
+                          <tr className="bg-surface-2/50">
+                            <td colSpan={9} className="px-4 pb-5 pt-2">
+                              <WhyBid r={r} lambda100={ready.summary.lambda_per_100} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -114,5 +144,46 @@ export default function Waivers() {
         </div>
       )}
     </>
+  );
+}
+
+function WhyBid({ r, lambda100 }: { r: SheetRow; lambda100: number }) {
+  const cost = (r.bid / 100) * lambda100; // win prob the money could buy later
+  const reasons = [
+    <>Adds <b>{num(r.pts_gain)} points</b> to your starting lineup over the next 4 weeks.</>,
+    <>That’s <b>+{pct(r.d_p_win, 2)}</b> on your chance to win the league.</>,
+    r.deny > 0.0005 ? (
+      <>
+        Winning him also keeps him away from{" "}
+        {r.rival ? <b>{r.rival}</b> : "a rival"}
+        {r.rival_p != null && <> (most likely to land him otherwise, {pct(r.rival_p, 0)})</>}: worth another{" "}
+        <b>{pct(r.deny, 2)}</b>.
+      </>
+    ) : null,
+    r.market_median >= 1 ? (
+      <>Rivals’ top bid is most likely around <b>{money(r.market_median)}</b>.</>
+    ) : (
+      <>Rivals rarely bid on him, so a small bid usually wins.</>
+    ),
+    <>
+      At <b>{money(r.bid)}</b> you get him <b>{pct(r.p_win_claim, 0)}</b> of the time. Bidding more raises that, but every
+      extra dollar is win chance you could spend on a later dump; {money(r.bid)} is worth about {pct(cost, 2)} of it.
+    </>,
+  ].filter(Boolean);
+  return (
+    <div className="grid gap-5 md:grid-cols-[1fr_1.1fr]">
+      <ul className="space-y-2 text-sm text-ink-2 [&_b]:font-semibold [&_b]:text-ink">
+        {reasons.map((x, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="mt-2 size-1.5 shrink-0 rounded-full bg-accent" />
+            <span>{x}</span>
+          </li>
+        ))}
+      </ul>
+      <div>
+        <div className="mb-1 text-xs text-muted">Chance you win the claim, by bid</div>
+        <BidCurve curve={r.curve} bid={r.bid} pGet={r.p_win_claim} median={r.market_median} />
+      </div>
+    </div>
   );
 }

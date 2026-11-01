@@ -42,3 +42,14 @@ def test_future_discount_saves_when_safe_and_spends_when_at_risk():
     risky = future_discount(np.array([0.5] + [0.05] * 8))
     assert 0.35 < safe < 0.5 and risky < safe / 1.5
     assert future_discount(np.array([0.3])) == 0.0  # last chop: money is worthless after
+
+
+def test_bid_curve_rises_from_zero_and_covers_the_recommended_bid():
+    from fantasy_model.recommend import bid_curve
+
+    opp = np.sort(np.random.default_rng(2).uniform(50, 250, 5000))
+    c = bid_curve(opp, faab=500, bid=180)
+    bids, ps = zip(*c, strict=True)
+    assert bids[0] == 0 and ps[0] == 0.0 and bids[-1] >= 180
+    assert all(b >= a for a, b in zip(ps, ps[1:], strict=False))  # P(get) never falls with bid
+    assert max(bids) <= 500

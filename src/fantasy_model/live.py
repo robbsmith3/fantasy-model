@@ -123,4 +123,9 @@ def live_odds(con, ctx, n_sims: int = 20000, scoreboard: dict | None = None) -> 
         "live": sum(1 for v in left.values() if 0 < v < 1) // 2,
         "final": sum(1 for v in left.values() if v == 0.0) // 2,
     }
-    return {"week": week, "games": games, "teams": out}
+    low = finals.min(axis=1)  # the score that gets chopped, per simulated finish
+    line = {
+        k: round(float(np.quantile(low, q)), 1)
+        for k, q in (("p10", 0.1), ("p50", 0.5), ("p90", 0.9))
+    }
+    return {"week": week, "games": games, "teams": out, "chop_line": line}
