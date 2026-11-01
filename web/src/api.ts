@@ -101,7 +101,7 @@ export type Recommendation = {
   plan: PlanRow[];
 };
 export type LineupSide = {
-  starters: { player_id: string; name: string; pos: string; mu: number }[];
+  starters: { slot: string; player_id: string; name: string; pos: string; mu: number }[];
   p_safe: number;
   mean: number;
 };
