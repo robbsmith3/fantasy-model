@@ -26,7 +26,7 @@ def test_spa_serves_assets_and_falls_back_to_index(tmp_path, monkeypatch):
     (tmp_path / "index.html").write_text("<div id=root></div>")
     (tmp_path / "assets" / "app.js").write_text("console.log(1)")
     monkeypatch.setattr(api, "WEB_DIST", tmp_path)
-    client = TestClient(api.create_app())
+    client = TestClient(api.create_app(), base_url="http://127.0.0.1")
     assert client.get("/assets/app.js").text == "console.log(1)"
     assert "root" in client.get("/waivers").text  # client-side route
     assert "root" in client.get("/../../etc/passwd").text  # no escaping the dist folder
@@ -124,4 +124,16 @@ def test_player_endpoint_404s_for_unknown_player(monkeypatch):
     monkeypatch.setattr(api, "compute_player", unknown)
     monkeypatch.setattr(api, "connect", _FakeCon)
     monkeypatch.setattr(api, "league_id", lambda: "L")
-    assert TestClient(api.create_app()).get("/api/players/nope").status_code == 404
+    assert (
+        TestClient(api.create_app(), base_url="http://127.0.0.1")
+        .get("/api/players/nope")
+        .status_code
+        == 404
+    )
+
+
+def test_requests_for_other_host_names_are_refused():
+    """A DNS-rebinding page arrives with its own domain in Host; only local names are served."""
+    app = api.create_app()
+    assert TestClient(app, base_url="http://evil.example").get("/api/meta").status_code == 400
+    assert TestClient(app, base_url="http://localhost:8000").get("/api/nope").status_code == 404

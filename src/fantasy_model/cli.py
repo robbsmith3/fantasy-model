@@ -25,6 +25,7 @@ Setup / utilities:
   live                          live chop odds from in-game scores (Sundays)
   review                        weekly report card: grade past bids/chops, refit calibration
   serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
+  backup                        zip data + config to [backup] dir, verify, keep last 8
 """
 
 from __future__ import annotations
@@ -310,6 +311,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("live")
     sub.add_parser("review")
+    sub.add_parser("backup")
     lu = sub.add_parser("lineup")
     lu.add_argument("--week", type=int)
     lu.add_argument("--team")
@@ -322,7 +324,25 @@ def main(argv: list[str] | None = None) -> None:
     a = ap.parse_args(argv)
 
     if a.cmd == "run":
-        sys.exit(0 if run_job(a.job) else 1)
+        ok = run_job(a.job)
+        if a.job == "post_waiver":  # weekly backup, after the job has released the database
+            from fantasy_model import backup
+
+            try:
+                r = backup.run()
+                print(f"backup {r['archive']} ({r['mb']} MB, verified)")
+            except Exception as e:  # a failed backup is reported, not a failed data job
+                print(f"BACKUP FAILED: {e}", file=sys.stderr)
+        sys.exit(0 if ok else 1)
+    if a.cmd == "backup":  # takes the write lock itself, so no shared connection here
+        from fantasy_model import backup
+
+        r = backup.run()
+        print(
+            f"backup {r['archive']} ({r['mb']} MB), verified: {r['verified_runs']} job runs "
+            f"inside; pruned {r['pruned']} old backup(s)"
+        )
+        return
     if a.cmd == "serve":
         from fantasy_model import api
 

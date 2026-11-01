@@ -19,12 +19,14 @@ import numpy as np
 import polars as pl
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from fantasy_model import config, fit, recommend
 
 WEB_DIST = config.PROJECT_ROOT / "web" / "dist"
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "[::1]"]
 mimetypes.add_type("application/manifest+json", ".webmanifest")  # PWA manifest
 PLATFORM = "sleeper"
 
@@ -454,6 +456,9 @@ def compute_model_report(lid: str) -> dict:
 def create_app() -> FastAPI:
     app = FastAPI(title="fantasy-model", docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+    # DNS-rebinding guard: a hostile site can point its own domain at 127.0.0.1 and have your
+    # browser read this API. Such requests carry that domain in Host, so only answer local names.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
     def versioned(name: str, fn, *args):
         con = connect()
@@ -600,6 +605,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{path:path}")
         def spa(path: str):
+            if path == "api" or path.startswith("api/"):  # unknown API path: a real 404
+                raise HTTPException(404, "not found")
             f = WEB_DIST / path
             if path and f.is_file() and WEB_DIST in f.resolve().parents:
                 return FileResponse(f)
