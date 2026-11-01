@@ -90,6 +90,9 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   404 instead of falling through to the web page.
 - gitleaks secret scanning in pre-commit and CI; full history scanned clean (28 commits).
 - GitHub Actions CI: Python lint/format/secrets/tests; web types/build/audit.
+- Monitoring: Windows toast on any failed job or backup (PowerShell from WSL, no extra
+  software); banner in the app for failed or overdue jobs (daily > 3 days, weekly jobs and
+  backup > 8 days). Backups are logged in `snapshot_run` like jobs.
 - Privacy pass for the public repo: other managers' team names and `.idea/` removed; git email
   switched to the GitHub noreply address.
 

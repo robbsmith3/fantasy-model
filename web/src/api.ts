@@ -200,8 +200,10 @@ export type ModelReport = {
   survival: { summary: Metrics; weeks: Metrics[] };
   prices: Metrics;
 };
+export type Alert = { level: "error" | "warning"; job: string; message: string };
 export type Meta = {
   version: string;
+  alerts: Alert[];
   runs: { id: string; job: string; ok: boolean | null; started: string; finished: string | null }[];
 };
 /** Slow endpoints answer {status} until a background computation finishes. */

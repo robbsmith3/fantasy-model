@@ -198,6 +198,9 @@ Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLO
   DNS rebinding, where a hostile web page points its own domain at your machine).
 - Every commit is scanned for secrets (gitleaks, in pre-commit and CI).
 
+**Monitoring.** A failed job or backup pops up a Windows notification right away, and the web app
+shows a banner when any job failed or hasn't run on schedule (e.g. the PC was off).
+
 **Backups.** Much of the database can't be re-downloaded (FAAB, waiver pools and projections at
 bid time). After each Wednesday `post_waiver` job, `data/` and your config are zipped to the
 folder set in `[backup] dir` (point it at OneDrive or another synced folder), the copy is

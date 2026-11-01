@@ -477,8 +477,11 @@ def create_app() -> FastAPI:
                 """SELECT snapshot_id, job, ok, started_at, finished_at FROM snapshot_run
                    ORDER BY started_at DESC LIMIT 15"""
             ).fetchall()
+            from fantasy_model import monitor
+
             return {
                 "version": data_version(con),
+                "alerts": monitor.alerts(con),
                 "runs": [
                     {
                         "id": r[0],
