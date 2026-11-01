@@ -35,7 +35,8 @@ elimination odds, served as a local web app.
   rivals spending their FAAB on each chopped roster give every team's chance of being chopped
   each week and of winning the league.
 - **Opponent bid model:** trained on every past claim in your league, *including losing bids*,
-  with each team's own bidding tendencies.
+  with each team's own bidding tendencies and **roster need**: how much the player would improve
+  that team's starting lineup, flex slots included.
 - **Projections:** an equal-weight consensus of Sleeper, ESPN, FantasyPros and our own LightGBM
   model built on nflverse usage, expected points and betting lines, scored with your league's
   exact rules.
@@ -129,8 +130,8 @@ from before it. Reproduce with the commands shown.
 | Projections | consensus misses by 5.38 pts per player-week (Sleeper alone: 5.42) | `ffm backtest-model 2 3 4 5 6 7` |
 | Team-score ranges | 80% ranges contain the actual score 80% of the time | `ffm validate-sim 1 2 3 4 5 6 7` |
 | Chop prediction | modestly better than chance (log score −2.52 vs −2.67) | `ffm validate-sim ...` |
-| Winning-bid prices | actual price inside the 80% range 67% of the time; prices run ~$48 above the median prediction | `ffm review` |
-| Naming the auction winner | right 12% of the time (in the top 3: 52%) | `ffm review` |
+| Winning-bid prices | actual price inside the 80% range 76% of the time; prices run ~$27 above the median prediction | `ffm review` |
+| Naming the auction winner | right 15% of the time (in the top 3: 45%) | `ffm review` |
 
 Week-to-week fantasy scoring is mostly noise, so the gains are in the margins. The weakest piece
 is predicting *which* rival wins a given player.

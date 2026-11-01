@@ -12,6 +12,7 @@ import math
 import numpy as np
 import polars as pl
 
+from fantasy_model import fit as lineup_fit
 from fantasy_model.value import frame
 
 
@@ -127,14 +128,17 @@ def quality(prior_ppg: float | None, season_pts: float, games: int) -> float | N
 
 # Backtest (`price_backtest`, 2026 legs 3-7, 33 contested auctions, CRPS lower = better):
 # base 103.3; +competition 105.1; +desperation 102.8; +leg 169.9 (extrapolates); +team effects
-# 96.7. So only shrunken team effects are on; comp/desp stay available for re-testing.
-DEFAULT_FEATURES: tuple[str, ...] = ()
+# 96.7. Roster need (log1p of lineup gain) on top: 92.8 -> 63.3, better in every leg, 80% ranges
+# hold 76% (was 67%), participation log-loss 0.416 -> 0.358; a linear need only reached 90.3.
+# comp/desp stay available for re-testing.
+DEFAULT_FEATURES: tuple[str, ...] = ("need",)
 TEAM_SHRINK = {"part": 60.0, "amt": 8.0}  # pseudo-observations pulling team effects to 0
 
 
-def _x(q, comp: float, leg: int, desp: float, feats=DEFAULT_FEATURES) -> np.ndarray:
+def _x(q, comp: float, leg: int, desp: float, feats=DEFAULT_FEATURES, need: float = 0.0):
     """Feature row for one (opponent, player): intercept, quality (DEF/unknown -> 0 + flag),
-    competition = log(1 + better players in the same pool), leg/18, opponent desperation."""
+    competition = log(1 + better players in the same pool), leg/18, opponent desperation,
+    roster need (see `need`)."""
     known = q is not None and not (isinstance(q, float) and math.isnan(q))
     row = [1.0, q if known else 0.0, 0.0 if known else 1.0]
     if "comp" in feats:
@@ -143,7 +147,98 @@ def _x(q, comp: float, leg: int, desp: float, feats=DEFAULT_FEATURES) -> np.ndar
         row.append(leg / 18)
     if "desp" in feats:
         row.append(desp)
+    if "need" in feats:
+        row.append(math.log1p(need))  # the first few PPG of need matter most
     return np.array(row)
+
+
+# ------------------------------------------------------------------ roster need
+# How much a player would lift a team's starting lineup, in perceived PPG (`quality`), judged the
+# way a manager would: his quality vs the starter he'd displace, with the league's flex slots.
+
+
+def need(roster: list[tuple[str, str, float]], pos: str | None, q, slots: list[str]) -> float:
+    """Lineup gain (PPG) from adding a (pos, quality) player to (id, pos, quality) roster."""
+    if pos is None or q is None or (isinstance(q, float) and math.isnan(q)):
+        return 0.0
+    base = lineup_fit.best_lineup(roster, slots)
+    return max(lineup_fit.best_lineup([*roster, ("_new", pos, q)], slots) - base, 0.0)
+
+
+def league_slots(con, platform: str, league_id: str) -> list[str]:
+    import json
+
+    s = con.execute(
+        "SELECT roster_slots FROM league WHERE platform = ? AND league_id = ?",
+        [platform, league_id],
+    ).fetchall()[0][0]
+    return json.loads(s) if isinstance(s, str) else s
+
+
+def positions(con) -> dict[str, str]:
+    return dict(
+        con.execute(
+            """SELECT DISTINCT ON (player_id) player_id, position
+               FROM player_status_snapshot ORDER BY player_id, snapshot_id DESC"""
+        ).fetchall()
+    )
+
+
+def need_table(con, platform: str, league_id: str, season: int, bt: pl.DataFrame) -> dict:
+    """{(leg, team, player): need} for every claimed player x alive team at each leg. A team's
+    roster at leg w is its week-w matchup roster (the waiver run follows week w's games)."""
+    import json
+
+    slots = league_slots(con, platform, league_id)
+    pos = positions(con)
+    pts = weekly_ppr(con, season)
+    prior = dict(
+        weekly_ppr(con, season - 1).group_by("player_id").agg(pl.col("pts").mean()).iter_rows()
+    )
+    out = {}
+    for (leg,), g in bt.group_by("leg"):
+        rows = con.execute(
+            "SELECT team_id, player_points FROM team_week WHERE platform = ? AND league_id = ? "
+            "AND season = ? AND week = ?",
+            [platform, league_id, season, leg],
+        ).fetchall()
+        agg = (
+            pts.filter(pl.col("week") <= leg)
+            .group_by("player_id")
+            .agg(pl.col("pts").sum(), pl.len().alias("g"))
+        )
+        seen = {pid: (s, n) for pid, s, n in agg.iter_rows()}
+
+        def qual(pid, seen=seen):
+            s, n = seen.get(pid, (0.0, 0))
+            v = quality(prior.get(pid), s, n)
+            return 0.0 if v is None else v
+
+        rosters = {}
+        for team, pp in rows:
+            ids = list((json.loads(pp) if isinstance(pp, str) else pp or {}).keys())
+            if ids:
+                rosters[team] = [(p, pos.get(p, "DEF"), qual(p)) for p in ids]
+        players = g.select("player_id", "quality").unique("player_id").iter_rows()
+        for pid, q in players:
+            for team, roster in rosters.items():
+                out[(leg, team, pid)] = need(roster, pos.get(pid), q, slots)
+    return out
+
+
+def current_needs(vals: pl.DataFrame, quality: dict, slots: list[str], teams, pids) -> dict:
+    """{(team, player): need} on today's rosters (vals.owner_team_id), for pricing this week."""
+    rows = vals.select("player_id", "position", "owner_team_id").iter_rows()
+    pos, rosters = {}, {}
+    for pid, p, owner in rows:
+        pos[pid] = p
+        if owner is not None:
+            rosters.setdefault(owner, []).append((pid, p, quality.get(pid) or 0.0))
+    return {
+        (t, pid): need(rosters.get(t, []), pos.get(pid), quality.get(pid), slots)
+        for t in teams
+        for pid in pids
+    }
 
 
 def competition(qs: list) -> list[float]:
@@ -184,6 +279,7 @@ def fit(
     feats=DEFAULT_FEATURES,
     team_effects: bool = True,
     calibrated: bool = True,
+    needs: dict | None = None,
 ) -> dict:
     """Fit participation + amount on main-run claims. desp: {leg: {team: desperation}}.
     calibrated: widen the residual spread by the weekly review's spread_k (see review.py);
@@ -197,6 +293,9 @@ def fit(
         keys = [(lg, p) for p in g["player_id"]]
         comp.update(zip(keys, competition(g["quality"].to_list()), strict=True))
     d = desp or {}
+    if "need" in feats and needs is None:
+        raise ValueError("the need feature needs `needs` (bids.need_table)")
+    nd = needs or {}
 
     # (1) participation: every (player, alive team) pair at that leg; bid > 0 counts as a bid.
     bidders = {
@@ -209,7 +308,16 @@ def fit(
     X, y, tp = [], [], []
     for lg, pid, q in players.iter_rows():
         for t in sorted(alive[lg]):
-            X.append(_x(q, comp[(lg, pid)], lg, d.get(lg, {}).get(t, 0.5), feats))
+            X.append(
+                _x(
+                    q,
+                    comp[(lg, pid)],
+                    lg,
+                    d.get(lg, {}).get(t, 0.5),
+                    feats,
+                    nd.get((lg, t, pid), 0),
+                )
+            )
             y.append(1.0 if t in bidders.get((lg, pid), ()) else 0.0)
             tp.append(t)
     X, y = np.array(X), np.array(y)
@@ -219,7 +327,7 @@ def fit(
     pos = bt.filter(pl.col("bid") > 0)
     Xa = np.array(
         [
-            _x(q, comp[(lg, p)], lg, d.get(lg, {}).get(t, 0.5), feats)
+            _x(q, comp[(lg, p)], lg, d.get(lg, {}).get(t, 0.5), feats, nd.get((lg, t, p), 0))
             for q, lg, p, t in pos.select("quality", "leg", "player_id", "team_id").iter_rows()
         ]
     )
@@ -267,13 +375,16 @@ def max_opponent_bids(
     n_sims: int = 20000,
     seed: int = 0,
     return_winner: bool = False,
+    needs: list[float] | None = None,
 ):
     """Simulated highest opponent bid for one player (0 when nobody bids).
-    opponents: (team_id, faab, desperation) for every alive rival. With return_winner, also the
-    index into `opponents` of the top bidder per sim (-1 when nobody bids)."""
+    opponents: (team_id, faab, desperation) for every alive rival; needs: each one's roster need
+    for this player. With return_winner, also the index into `opponents` of the top bidder per
+    sim (-1 when nobody bids)."""
     rng = np.random.default_rng(seed)
     feats = model.get("feats", ())
-    xs = np.array([_x(q, comp, leg, dsp, feats) for _, _, dsp in opponents])
+    nd = needs or [0.0] * len(opponents)
+    xs = np.array([_x(q, comp, leg, o[2], feats, n) for o, n in zip(opponents, nd, strict=True)])
     team_p = np.array([model["team_part"].get(t, 0.0) for t, _, _ in opponents])
     p_bid = 1 / (1 + np.exp(-(xs @ model["w_part"] + team_p)))
     mean = xs @ model["w_amt"] + np.array([model["team_amt"].get(t, 0.0) for t, _, _ in opponents])
@@ -307,9 +418,11 @@ def price_backtest(
         lg: desperation(con, platform, league_id, season, lg, alive[lg])
         for lg in range(1, max(legs) + 1)
     }
+    nd = need_table(con, platform, league_id, season, bt)
     out = []
     for leg in legs:
-        model = fit(bt, alive, legs=list(range(1, leg)), desp=desp, calibrated=False, **fit_kw)
+        model = fit(bt, alive, legs=list(range(1, leg)), desp=desp, calibrated=False,
+                    needs=nd, **fit_kw)  # fmt: skip
         run = main_runs(bt.filter(pl.col("leg") == leg))
         mp = run["processed_at"][0]
         spent = dict(bt.filter(pl.col("won") & (pl.col("processed_at") < mp))
@@ -322,7 +435,8 @@ def price_backtest(
         pool = pool.with_columns(pl.Series("comp", competition(pool["quality"].to_list())))
         contested = pool.filter(pl.col("win") >= min_win).sort("player_id")
         for pid, q, win, cp in contested.iter_rows():
-            mx = scale * max_opponent_bids(model, q, opps, cp, leg)
+            needs = [nd.get((leg, t, pid), 0.0) for t, _, _ in opps]
+            mx = scale * max_opponent_bids(model, q, opps, cp, leg, needs=needs)
             lo, med, hi = np.quantile(mx, [0.1, 0.5, 0.9])
             out.append((leg, pid, win, crps(mx, win), lo <= win <= hi, med - win, hi - lo))
     a = np.array([r[2:] for r in out], dtype=float)

@@ -56,7 +56,7 @@ def test_fit_recovers_participation_direction():
         ],
         orient="row",
     )
-    m = bids.fit(bt, alive)
+    m = bids.fit(bt, alive, feats=())
     assert m["w_part"][1] > 0 and m["w_amt"][1] > 0
 
 
@@ -81,7 +81,7 @@ def test_team_effects_are_shrunk_and_raise_an_aggressive_teams_bids():
                 "faab_before", "quality", "share"],
         orient="row",
     )  # fmt: skip
-    m = bids.fit(bt, alive)
+    m = bids.fit(bt, alive, feats=())
     assert m["team_amt"]["hi"] > 0 > m["team_amt"]["lo"]
     assert abs(m["team_amt"]["hi"]) < np.log(10) / 2  # shrunk toward 0 (true gap is log 10)
 
@@ -105,11 +105,41 @@ def test_fit_applies_the_weekly_review_calibration_only_when_asked(tmp_path):
     from fantasy_model import review
 
     bt, alive = _toy_bids()
-    raw = bids.fit(bt, alive, calibrated=False)
+    raw = bids.fit(bt, alive, feats=(), calibrated=False)
     review.CALIBRATION_PATH.write_text(json.dumps({"spread_k": 1.5, "level_s": 1.2}))
-    cal = bids.fit(bt, alive)
+    cal = bids.fit(bt, alive, feats=())
     assert np.isclose(cal["resid_sd"], raw["resid_sd"] * 1.5) and cal["level"] == 1.2
     assert "level" not in raw
     faab = [("a", 900, 0.5), ("b", 600, 0.5)]
     hi = np.median(bids.max_opponent_bids(dict(raw, level=1.5), 18.0, faab))
     assert hi > np.median(bids.max_opponent_bids(raw, 18.0, faab))
+
+
+def test_need_counts_flex_and_ignores_positions_already_covered():
+    slots = ["QB", "RB", "WR", "FLEX", "BN"]
+    roster = [("q", "QB", 18.0), ("r", "RB", 12.0), ("w", "WR", 14.0), ("w2", "WR", 6.0)]
+    assert bids.need(roster, "RB", 10.0, slots) == 4.0  # takes the FLEX from the 6-pt WR
+    assert bids.need(roster, "QB", 15.0, slots) == 0.0  # backup QB never starts
+    assert bids.need(roster, "TE", None, slots) == 0.0  # unknown quality
+
+
+def test_fit_learns_that_teams_with_a_need_bid_more_often():
+    rng = np.random.default_rng(5)
+    rows, needs, alive = [], {}, {1: {str(t) for t in range(10)}}
+    for i, q in enumerate(rng.uniform(6, 20, 40)):
+        for t in range(10):
+            nd = float(rng.choice([0.0, 6.0]))
+            needs[(1, str(t), f"p{i}")] = nd
+            if rng.random() < (0.6 if nd else 0.1):
+                rows.append(("t", 1, str(t), False, 50, 0, f"p{i}", 1000, q, 0.05))
+    schema = ["transaction_id", "leg", "team_id", "won", "bid", "processed_at", "player_id",
+              "faab_before", "quality", "share"]  # fmt: skip
+    bt = pl.DataFrame(rows, schema=schema, orient="row")
+    m = bids.fit(bt, alive, needs=needs, team_effects=False)
+    assert m["w_part"][3] > 0
+    try:
+        bids.fit(bt, alive)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("fitting with the need feature but no needs should fail")

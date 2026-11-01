@@ -58,9 +58,10 @@ def _auctions(con, platform: str, league_id: str, season: int) -> list[dict]:
     players = dict(
         con.execute("SELECT player_id, full_name FROM player_status_snapshot").fetchall()
     )
+    nd = bids.need_table(con, platform, league_id, season, bt)
     out = []
     for leg in legs[2:]:  # need two earlier runs to fit on
-        model = bids.fit(bt, alive, legs=[x for x in legs if x < leg], calibrated=False)
+        model = bids.fit(bt, alive, legs=[x for x in legs if x < leg], calibrated=False, needs=nd)
         run = runs.filter(pl.col("leg") == leg)
         mp = run["processed_at"][0]
         spent = dict(
@@ -75,9 +76,14 @@ def _auctions(con, platform: str, league_id: str, season: int) -> list[dict]:
         for pid, q, winner, price in won.select(
             "player_id", "quality", "team_id", "bid"
         ).iter_rows():
-            mx = bids.max_opponent_bids(model, q, opps)
+            needs = [nd.get((leg, t, pid), 0.0) for t, _, _ in opps]
+            mx = bids.max_opponent_bids(model, q, opps, needs=needs)
             ranks = sorted(
-                ((dynamics.expected_bid(model, q, t, f), t) for t, f in faab.items()), reverse=True
+                (
+                    (dynamics.expected_bid(model, q, t, f, nd.get((leg, t, pid), 0.0)), t)
+                    for t, f in faab.items()
+                ),
+                reverse=True,
             )
             out.append(
                 {
@@ -95,6 +101,7 @@ def _auctions(con, platform: str, league_id: str, season: int) -> list[dict]:
                     "_model": model,
                     "_q": q,
                     "_opps": opps,
+                    "_needs": needs,
                 }
             )
     return out
@@ -105,7 +112,7 @@ def _score(auctions: list[dict], k: float, s: float, n_sims: int = 20000) -> tup
     crps, hits = [], []
     for a in auctions:
         m = dict(a["_model"], resid_sd=a["_model"]["resid_sd"] * k, level=s)
-        mx = bids.max_opponent_bids(m, a["_q"], a["_opps"], n_sims=n_sims)
+        mx = bids.max_opponent_bids(m, a["_q"], a["_opps"], n_sims=n_sims, needs=a["_needs"])
         crps.append(bids.crps(mx, a["price"]))
         lo, hi = np.quantile(mx, [0.1, 0.9])
         hits.append(lo <= a["price"] <= hi)
