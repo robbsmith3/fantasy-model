@@ -50,7 +50,7 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   model (log score -2.59 vs -2.52; uniform -2.67), so production keeps the fast team-level form.
 - Added team-strength drift (starters' projections drift ~3 pts after 1 week, ~5 after 6):
   our P(win) 47% -> 38%.
-- Rival pickups: first version had Four More Yards (most FAAB) at 76% to win because it won
+- Rival pickups: first version had the team with the most FAAB at 76% to win because it won
   every future dump. Fixed by tracking FAAB per simulated season and valuing sequential pickups;
   now ~12%. Backtest of "who wins the auction": right 12% (top 3: 52%; richest team 3%).
 

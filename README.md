@@ -28,7 +28,7 @@ elimination odds, served as a local web app.
 - **Waiver claim plan:** for each available player, the bid that best trades a higher chance of
   winning him against the FAAB it costs you later. Claims are planned together (distinct drops,
   total within budget) and each one explains itself ("adds 8.7 pts over 4 weeks, keeps him from
-  Space Cowboys, market ~$115").
+  the rival most likely to land him, market ~$115").
 - **Season simulation:** 20,000 simulated seasons of weekly scores, team-strength drift and
   rivals spending their FAAB on each chopped roster give every team's chance of being chopped
   each week and of winning the league.
@@ -179,6 +179,15 @@ cd web && npm run dev             # frontend with hot reload (proxies /api to `f
 Secrets stay out of the repo: Yahoo credentials are 1Password references in
 `config/yahoo.env`, and the OAuth token lives in `~/.config/fantasy-model/` (chmod 600).
 Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLOG.md).
+
+## Security
+
+- `ffm serve` listens on `127.0.0.1` only and has no login. Keep it that way: don't bind it to
+  `0.0.0.0` or forward its port, or anyone on the network could read your league data.
+- No credentials live in this repo. League ids are in the git-ignored `config/leagues.toml`;
+  Yahoo's client id and secret are 1Password references (`config/yahoo.env`); the OAuth token is
+  stored outside the repo with owner-only permissions.
+- Collected data (`data/`) and logs (`logs/`) are git-ignored.
 
 ## License
 
