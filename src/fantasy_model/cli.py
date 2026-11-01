@@ -20,11 +20,11 @@ Setup / utilities:
   backtest-model WEEK [WEEK ...]  walk-forward accuracy of our model vs sources
   validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
   recommend [--assume-chop TEAM_ID] [--csv PATH]
-  serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
-  review                        weekly report card: grade past bids/chops, refit calibration
+                                bid sheet for the next Sleeper waiver run
   lineup [--week N] [--team ID] survival lineup: max P(not lowest) vs max points
   live                          live chop odds from in-game scores (Sundays)
-                                bid sheet for the next Sleeper waiver run
+  review                        weekly report card: grade past bids/chops, refit calibration
+  serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
 """
 
 from __future__ import annotations
