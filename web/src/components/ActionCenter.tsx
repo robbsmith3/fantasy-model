@@ -7,6 +7,7 @@ import { Countdown } from "./brand";
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function Item({ to, icon, title, detail, deadline, tone = "default" }: {
   to: "/waivers" | "/lineup" | "/live";
@@ -52,9 +53,26 @@ export function ActionCenter() {
   const gamesOn = tl?.sunday_main ? Date.now() >= new Date(tl.sunday_main).getTime() - 15 * 60_000 : false;
 
   const items: { at: number; node: ReactNode }[] = [];
-  if (tl?.next_waiver) {
+  if (tl?.waiver_processing && tl.waiver_processed) {
+    // Past the cutoff: claims are locked and Sleeper is running them.
     items.push({
-      at: new Date(tl.next_waiver).getTime(),
+      at: new Date(tl.waiver_processed).getTime(),
+      node: (
+        <Item
+          key="w"
+          to="/waivers"
+          tone="accent"
+          icon="M12 3v18M7 8h7.5a3 3 0 010 6H8.5a3 3 0 000 6H17"
+          title="Waivers are processing"
+          detail="Claims are locked; results should post in a few minutes"
+          deadline={{ label: "results ~", at: tl.waiver_processed }}
+        />
+      ),
+    });
+  } else if (tl?.waiver_cutoff) {
+    const results = tl.waiver_processed ? ` · results ~${clock(tl.waiver_processed)}` : "";
+    items.push({
+      at: new Date(tl.waiver_cutoff).getTime(),
       node: (
         <Item
           key="w"
@@ -63,13 +81,13 @@ export function ActionCenter() {
           icon="M12 3v18M7 8h7.5a3 3 0 010 6H8.5a3 3 0 000 6H17"
           title="Submit your claims"
           detail={
-            plan == null
+            (plan == null
               ? "Bid plan is computing…"
               : plan.length === 0
                 ? "No claim worth placing right now"
-                : `${plan.length} claim${plan.length > 1 ? "s" : ""} · ${money(plan.reduce((s, p) => s + p.bid, 0))} if all win · top: ${plan[0].player}`
+                : `${plan.length} claim${plan.length > 1 ? "s" : ""} · ${money(plan.reduce((s, p) => s + p.bid, 0))} if all win · top: ${plan[0].player}`) + results
           }
-          deadline={{ label: "waivers", at: tl.next_waiver }}
+          deadline={{ label: "claims due", at: tl.waiver_cutoff }}
         />
       ),
     });

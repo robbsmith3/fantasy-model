@@ -55,10 +55,28 @@ def test_timeline_rolls_waiver_forward_in_eastern_time_and_finds_kickoffs(con, m
             '{day}' AS gameday, '13:00' AS gametime, 'Sunday' AS weekday"""
     )
     t = api.compute_timeline(con, "L")
-    nw = datetime.fromisoformat(t["next_waiver"])
-    assert now < nw <= now + timedelta(days=7)
-    assert nw.astimezone(et).strftime("%H:%M") == "03:08"
+    cut = datetime.fromisoformat(t["waiver_cutoff"])
+    done = datetime.fromisoformat(t["waiver_processed"])
+    assert now < done <= now + timedelta(days=7)
+    assert cut.astimezone(et).strftime("%H:%M") == "03:00"  # claims lock on the hour
+    assert done.astimezone(et).strftime("%H:%M") == "03:08"  # results a few minutes later
     assert t["next_kickoff"] == t["sunday_main"] and t["next_kickoff_week"] == 9
+
+
+def test_waiver_window_reports_processing_between_cutoff_and_results():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    et = ZoneInfo("America/New_York")
+    last = datetime(2026, 10, 28, 3, 8, 54, tzinfo=et)  # a Wednesday run
+    # Tuesday night: next cutoff is Wed 3:00, results 3:08.
+    cut, done = api.waiver_window(last, datetime(2026, 11, 3, 22, 0, tzinfo=et), et)
+    assert (cut.strftime("%a %H:%M"), done.strftime("%H:%M")) == ("Wed 03:00", "03:08")
+    # 3:04 Wednesday: past the cutoff, still processing -> same run, not next week.
+    cut2, done2 = api.waiver_window(last, datetime(2026, 11, 4, 3, 4, tzinfo=et), et)
+    assert (cut2, done2) == (cut, done)
+    # Across the DST change (Nov 1) the wall-clock time holds.
+    assert cut.utcoffset() != last.utcoffset() and cut.hour == 3
 
 
 def test_team_avatars_prefer_custom_team_image(con):

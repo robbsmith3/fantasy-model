@@ -5,13 +5,14 @@ import { Fragment, useState } from "react";
 import { money, num, pct, q, type PlanRow, type SheetRow } from "../api";
 import { BidCurve } from "../components/charts";
 import { PlayerLink } from "../components/PlayerSheet";
-import { PlayerHead } from "../components/brand";
+import { Countdown, PlayerHead } from "../components/brand";
 import { Card, Computing, ErrorBox, InjuryBadge, PageHeader, Pos, Stat, Td, Th } from "../components/ui";
 
 export default function Waivers() {
   const { chop } = useSearch({ strict: false }) as { chop?: string };
   const navigate = useNavigate();
   const { data: L } = useSuspenseQuery(q.league());
+  const tl = useQuery(q.timeline()).data;
   // Keep the last sheet on screen (dimmed) while another scenario computes: no layout jump.
   const rec = useQuery({ ...q.recommend(chop), placeholderData: keepPreviousData });
   const ready = rec.data?.status === "ready" ? rec.data.data : null;
@@ -48,6 +49,7 @@ export default function Waivers() {
         }
       />
 
+      {tl?.waiver_cutoff && <Deadline cutoff={tl.waiver_cutoff} processed={tl.waiver_processed} processing={tl.waiver_processing} />}
       {rec.isError && <ErrorBox error={rec.error} />}
       {rec.data?.status === "error" && <ErrorBox error={rec.data.error} />}
       {rec.data?.status === "computing" && (
@@ -237,6 +239,33 @@ function ClaimActions({ plan, leagueId }: { plan: PlanRow[]; leagueId: string })
           onFocus={(e) => e.currentTarget.select()}
           className="w-72 rounded-lg border border-line bg-surface p-2 text-xs"
         />
+      )}
+    </div>
+  );
+}
+
+const at = (iso: string, opts: Intl.DateTimeFormatOptions) => new Date(iso).toLocaleString([], opts);
+
+/** Claims lock at the cutoff; Sleeper posts results a few minutes later. */
+function Deadline({ cutoff, processed, processing }: { cutoff: string; processed: string | null; processing: boolean }) {
+  const time = { hour: "numeric", minute: "2-digit" } as const;
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm">
+      {processing ? (
+        <>
+          <span className="font-semibold">Claims are locked: waivers are processing</span>
+          {processed && <span className="text-ink-2">results ~{at(processed, time)} (<Countdown to={processed} />)</span>}
+        </>
+      ) : (
+        <>
+          <span>
+            Claims due <span className="font-semibold">{at(cutoff, { weekday: "short", ...time })}</span>
+          </span>
+          <span className="rounded-full bg-accent-wash px-2 py-0.5 text-xs font-semibold text-accent">
+            <Countdown to={cutoff} /> left
+          </span>
+          {processed && <span className="text-ink-2">results ~{at(processed, time)}</span>}
+        </>
       )}
     </div>
   );
