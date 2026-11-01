@@ -1,5 +1,7 @@
 # Chop Desk
 
+[![CI](https://github.com/robbsmith3/fantasy-model/actions/workflows/ci.yml/badge.svg)](https://github.com/robbsmith3/fantasy-model/actions/workflows/ci.yml)
+
 **A FAAB bidding and survival model for guillotine fantasy football leagues.**
 
 In a guillotine league the lowest-scoring team each week is eliminated ("chopped") and its whole
@@ -113,6 +115,7 @@ uv run ffm live                                              # in-game chop odds
 uv run ffm review                                            # weekly report card
 uv run ffm serve                                             # web app
 uv run ffm health                                            # recent jobs and failures
+uv run ffm backup                                            # zip data + config, verify
 uv run ffm --help                                            # everything else
 ```
 
@@ -170,9 +173,12 @@ respect each provider's terms.
 
 ## Development
 
+CI (GitHub Actions) runs on every push and pull request: lint, format, secret scan and tests for
+Python; type check, build and `npm audit` for the web app.
+
 ```bash
 uv run pytest                     # Python tests (all network calls mocked)
-uv run pre-commit run --all-files # ruff lint + format
+uv run pre-commit run --all-files # ruff lint + format + gitleaks secret scan
 cd web && npm run dev             # frontend with hot reload (proxies /api to `ffm serve`)
 ```
 
@@ -188,6 +194,14 @@ Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLO
   Yahoo's client id and secret are 1Password references (`config/yahoo.env`); the OAuth token is
   stored outside the repo with owner-only permissions.
 - Collected data (`data/`) and logs (`logs/`) are git-ignored.
+- The server only answers requests addressed to `127.0.0.1`/`localhost` (a guard against
+  DNS rebinding, where a hostile web page points its own domain at your machine).
+- Every commit is scanned for secrets (gitleaks, in pre-commit and CI).
+
+**Backups.** Much of the database can't be re-downloaded (FAAB, waiver pools and projections at
+bid time). After each Wednesday `post_waiver` job, `data/` and your config are zipped to the
+folder set in `[backup] dir` (point it at OneDrive or another synced folder), the copy is
+verified by opening it, and the newest 8 are kept.
 
 ## License
 

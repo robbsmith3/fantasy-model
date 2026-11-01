@@ -18,5 +18,10 @@ platform  = "yahoo"
 league_id = ""
 nickname  = "yahoo-2"
 
+[backup]
+# Weekly backups of data/ + this file (after post_waiver, or `ffm backup`). Use a synced folder
+# (OneDrive, Dropbox...) so copies leave this machine. Default: ~/fantasy-model-backups
+# dir = "/mnt/c/Users/<you>/OneDrive/fantasy-model-backups"
+
 [projections]
 weeks_ahead = 4             # each pre_waiver run projects current week + N

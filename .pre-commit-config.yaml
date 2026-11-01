@@ -6,3 +6,8 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+  # Block commits that contain secrets (API keys, tokens, private keys). Public repo.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks

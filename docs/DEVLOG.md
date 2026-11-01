@@ -84,6 +84,15 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   The weekly calibration therefore minimizes CRPS (currently: no correction) and refits the
   rival pay scale (1.445, matching the hand-set 1.45).
 
+### Hardening
+- Weekly verified backups of `data/` + config to OneDrive (43 MB compressed from 98 MB).
+- API refuses requests for other host names (DNS rebinding guard); unknown `/api/*` paths now
+  404 instead of falling through to the web page.
+- gitleaks secret scanning in pre-commit and CI; full history scanned clean (28 commits).
+- GitHub Actions CI: Python lint/format/secrets/tests; web types/build/audit.
+- Privacy pass for the public repo: other managers' team names and `.idea/` removed; git email
+  switched to the GitHub noreply address.
+
 ## Open questions
 - Naming auction winners is the weakest piece; weekly roster need is the obvious missing input.
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.
