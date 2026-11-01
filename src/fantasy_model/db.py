@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,10 +13,20 @@ from fantasy_model import config
 from fantasy_model.schema import SCHEMA
 
 
-def connect(path: Path | None = None) -> duckdb.DuckDBPyConnection:
+def connect(path: Path | None = None, wait_s: float = 120.0) -> duckdb.DuckDBPyConnection:
+    """Read-write connection. DuckDB allows one writer and no writer while another process holds
+    the file (e.g. `ffm serve` mid-computation), so wait for the lock instead of failing a job."""
     path = Path(path or config.DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(path))
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            con = duckdb.connect(str(path))
+            break
+        except duckdb.IOException:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(1.0)
     con.execute(SCHEMA)
     return con
 

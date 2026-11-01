@@ -409,13 +409,27 @@ def create_app() -> FastAPI:
 
 
 def warm(lid: str | None = None) -> None:
-    """Start the slow default bid sheet in the background so the Waivers page is ready."""
+    """Precompute in the background so first page loads are instant: league odds and players
+    (~3 s each, now that rivals' pickups are simulated) and the default bid sheet (~15-20 s)."""
     try:
         con = connect()
-        key = ("recommend", data_version(con), None)
+        version = data_version(con)
         con.close()
         lid = lid or league_id()
-        cache.get_async(key, lambda: compute_recommend(lid, None))
+
+        def fast(name, fn):
+            def run():
+                c = connect()
+                try:
+                    return fn(c, lid)
+                finally:
+                    c.close()
+
+            return cache.get_async((name, version), run)
+
+        fast("league", compute_league)
+        fast("players", compute_players)
+        cache.get_async(("recommend", version, None), lambda: compute_recommend(lid, None))
     except Exception:
         pass
 
