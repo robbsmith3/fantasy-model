@@ -454,7 +454,8 @@ def main(argv: list[str] | None = None) -> None:
         for sw in r["swaps"]:
             print(f"  start {sw['in']}  instead of  {sw['out']}")
         for x in sv["starters"]:
-            print(f"    {x['pos']:4} {x['name']:24} {x['mu']:5.1f}")
+            tag = x["slot"] if x["slot"] == x["pos"] else f"{x['slot']}:{x['pos']}"
+            print(f"    {tag:7} {x['name']:24} {x['mu']:5.1f}")
     elif a.cmd == "recommend":
         print_recommendation(con, a.assume_chop, a.csv)
     elif a.cmd == "health":

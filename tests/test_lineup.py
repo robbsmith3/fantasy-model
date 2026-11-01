@@ -5,6 +5,19 @@ from fantasy_model import lineup
 SLOTS = ["QB", "RB", "WR", "FLEX", "BN", "BN"]
 
 
+def test_assign_slots_orders_positions_then_flex_then_def():
+    slots = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "DEF", "BN"]
+    starters = [
+        ("d", "DEF", 7), ("w3", "WR", 9), ("q", "QB", 20), ("r1", "RB", 15), ("w1", "WR", 14),
+        ("r3", "RB", 8), ("t", "TE", 10), ("r2", "RB", 12), ("w2", "WR", 11),
+    ]  # fmt: skip
+    got = lineup.assign_slots(starters, slots)
+    assert got == [
+        ("QB", "q"), ("RB", "r1"), ("RB", "r2"), ("WR", "w1"), ("WR", "w2"), ("TE", "t"),
+        ("FLEX", "w3"), ("FLEX", "r3"), ("DEF", "d"),
+    ]  # fmt: skip
+
+
 def test_legal_respects_slot_eligibility():
     ok = [("q", "QB"), ("r", "RB"), ("w", "WR"), ("t", "TE")]  # TE fills FLEX
     assert lineup.legal(ok, SLOTS)

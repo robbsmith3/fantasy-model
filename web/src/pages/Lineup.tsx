@@ -6,6 +6,8 @@ import { PlayerHead } from "../components/brand";
 import { PlayerLink } from "../components/PlayerSheet";
 import { Card, ErrorBox, PageHeader, Pos, Segmented, Skeleton, Stat } from "../components/ui";
 
+const SLOT_LABEL: Record<string, string> = { WRRB_FLEX: "W/R", REC_FLEX: "W/T", SUPER_FLEX: "SFLX" };
+
 function Side({ title, side, other, accent }: { title: string; side: LineupSide; other: LineupSide; accent?: boolean }) {
   const otherIds = new Set(other.starters.map((s) => s.player_id));
   return (
@@ -19,8 +21,9 @@ function Side({ title, side, other, accent }: { title: string; side: LineupSide;
           <li key={s.player_id} className="flex items-center justify-between py-2 text-sm">
             <span className={clsx("flex items-center gap-2.5", !otherIds.has(s.player_id) && "font-semibold")}>
               <PlayerHead id={s.player_id} name={s.name} size={28} />
-              <Pos pos={s.pos} />
+              <Pos pos={SLOT_LABEL[s.slot] ?? s.slot} />
               <PlayerLink id={s.player_id}>{s.name}</PlayerLink>
+              {s.slot !== s.pos && <span className="text-xs text-muted">{s.pos}</span>}
               {!otherIds.has(s.player_id) && <span className="ml-2 text-xs font-normal text-accent">differs</span>}
             </span>
             <span className="tabular text-ink-2">{num(s.mu)}</span>

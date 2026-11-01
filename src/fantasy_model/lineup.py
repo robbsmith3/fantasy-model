@@ -15,6 +15,25 @@ import polars as pl
 
 from fantasy_model import fit, player_sim, value
 
+# Display order for starting slots; flex slots come after the positions they draw from.
+SLOT_ORDER = ["QB", "RB", "WR", "TE", "WRRB_FLEX", "REC_FLEX", "FLEX", "SUPER_FLEX", "K", "DEF"]
+
+
+def assign_slots(starters: list[tuple[str, str, float]], slots: list[str]) -> list[tuple[str, str]]:
+    """(slot, id) for a legal set of (id, position, mu) starters, in SLOT_ORDER. Narrowest slots
+    fill first with the highest projection, so flex slots get the leftovers."""
+    used: set[str] = set()
+    out = []
+    starting = [s for s in slots if s in fit.SLOT_ELIGIBLE]
+    for slot in sorted(starting, key=lambda s: len(fit.SLOT_ELIGIBLE[s])):
+        for pid, pos, _ in sorted(starters, key=lambda r: -r[2]):
+            if pid not in used and pos in fit.SLOT_ELIGIBLE[slot]:
+                used.add(pid)
+                out.append((slot, pid))
+                break
+    rank = {s: i for i, s in enumerate(SLOT_ORDER)}
+    return sorted(out, key=lambda r: rank.get(r[0], len(rank)))
+
 
 def legal(starters: list[tuple[str, str]], slots: list[str]) -> bool:
     """Can these (id, position) starters fill the starting slots exactly? Bipartite matching."""
@@ -111,9 +130,10 @@ def optimize(
         return float((mine_draws[:, [ids.index(p) for p in starters]].sum(axis=1) > line).mean())
 
     def describe(starters):
+        slotted = assign_slots([(p, pos[p], mu[p]) for p in starters], ctx.slots)
         return [
-            {"player_id": p, "name": name[p], "pos": pos[p], "mu": round(mu[p], 1)}
-            for p in sorted(starters, key=lambda p: (pos[p], -mu[p]))
+            {"slot": s, "player_id": p, "name": name[p], "pos": pos[p], "mu": round(mu[p], 1)}
+            for s, p in slotted
         ]
 
     def summary(starters):
