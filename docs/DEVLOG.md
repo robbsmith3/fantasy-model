@@ -148,6 +148,16 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   also fixed later weeks on the Lineup page, which were treated as the next game.
 - IR/PUP players aren't on injury reports; those curves stay hand-set.
 
+### Rival lineups: tested, no change
+- The season simulation assumes every team starts its best projected lineup. Checked against
+  actual starters, 2026 weeks 1-7 (105 team-weeks, `scripts/experiments/lineup_gap.py`): teams
+  fall short of their best lineup by 0.4 pts (median), 1.5 (mean), 4.9 (90th percentile);
+  7 team-weeks had a dead slot (bye/injured starter).
+- Not a team trait: first-half vs second-half shortfall correlates 0.10, and the spread between
+  teams (variance 1.95) is what noise alone gives (2.08). A shared shortfall doesn't change who
+  is lowest, and lineup mistakes are already inside the weekly score SD (fit to actual scores).
+  So no rival-lineup model; rerun the script later in the season if habits might have formed.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.
