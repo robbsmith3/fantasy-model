@@ -84,3 +84,32 @@ def test_team_effects_are_shrunk_and_raise_an_aggressive_teams_bids():
     m = bids.fit(bt, alive)
     assert m["team_amt"]["hi"] > 0 > m["team_amt"]["lo"]
     assert abs(m["team_amt"]["hi"]) < np.log(10) / 2  # shrunk toward 0 (true gap is log 10)
+
+
+def _toy_bids():
+    rng = np.random.default_rng(3)
+    rows, alive = [], {1: {str(t) for t in range(6)}}
+    for i, q in enumerate(rng.uniform(6, 20, 30)):
+        for t in range(6):
+            if rng.random() < 0.4:
+                share = float(np.clip(np.exp(-4 + 0.15 * q + 0.4 * rng.standard_normal()), 0, 1))
+                rows.append(("t", 1, str(t), False, int(share * 1000), 0, f"p{i}", 1000, q, share))
+    schema = ["transaction_id", "leg", "team_id", "won", "bid", "processed_at", "player_id",
+              "faab_before", "quality", "share"]  # fmt: skip
+    return pl.DataFrame(rows, schema=schema, orient="row"), alive
+
+
+def test_fit_applies_the_weekly_review_calibration_only_when_asked(tmp_path):
+    import json
+
+    from fantasy_model import review
+
+    bt, alive = _toy_bids()
+    raw = bids.fit(bt, alive, calibrated=False)
+    review.CALIBRATION_PATH.write_text(json.dumps({"spread_k": 1.5, "level_s": 1.2}))
+    cal = bids.fit(bt, alive)
+    assert np.isclose(cal["resid_sd"], raw["resid_sd"] * 1.5) and cal["level"] == 1.2
+    assert "level" not in raw
+    faab = [("a", 900, 0.5), ("b", 600, 0.5)]
+    hi = np.median(bids.max_opponent_bids(dict(raw, level=1.5), 18.0, faab))
+    assert hi > np.median(bids.max_opponent_bids(raw, 18.0, faab))

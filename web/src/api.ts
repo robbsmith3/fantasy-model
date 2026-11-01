@@ -166,6 +166,33 @@ export type PlayerDetail = {
   } | null;
   bids: { week: number; team: string; bid: number; won: boolean }[];
 };
+export type Review = {
+  latest_leg: number | null;
+  latest: {
+    leg: number;
+    player_id: string;
+    player: string;
+    price: number;
+    pred_median: number;
+    pred_p10: number;
+    pred_p90: number;
+    winner: string;
+    pred_winner: string;
+    winner_top3: boolean;
+  }[];
+  by_leg: { leg: number; n: number; covered: number; bias: number; winner_hits: number; winner_top3: number }[];
+  summary: { auctions: number; coverage: number; median_bias: number; winner_hit: number; winner_top3: number };
+  chop: { weeks: { week: number; teams: number; p_player: number; rank_player: number }[]; summary: Record<string, number> };
+  my_claims: { week: number; player: string; bid: number; won: boolean; winning_bid: number | null }[];
+  calibration: {
+    spread_k: number;
+    level_s: number;
+    pay_scale: number | null;
+    crps_before: number;
+    crps_after: number;
+    computed_at: string;
+  };
+};
 export type Metrics = Record<string, number | string | null>;
 export type ModelReport = {
   weeks: number[];
@@ -238,6 +265,13 @@ export const q = {
     queryOptions({
       queryKey: ["model"],
       queryFn: () => get<Async<ModelReport>>("/api/model"),
+      staleTime: 10 * MIN,
+      refetchInterval: (query) => (query.state.data?.status === "computing" ? 2000 : false),
+    }),
+  review: () =>
+    queryOptions({
+      queryKey: ["review"],
+      queryFn: () => get<Async<Review>>("/api/review"),
       staleTime: 10 * MIN,
       refetchInterval: (query) => (query.state.data?.status === "computing" ? 2000 : false),
     }),

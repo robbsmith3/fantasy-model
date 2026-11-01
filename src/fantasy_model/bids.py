@@ -183,8 +183,11 @@ def fit(
     desp: dict[int, dict[str, float]] | None = None,
     feats=DEFAULT_FEATURES,
     team_effects: bool = True,
+    calibrated: bool = True,
 ) -> dict:
-    """Fit participation + amount on main-run claims. desp: {leg: {team: desperation}}."""
+    """Fit participation + amount on main-run claims. desp: {leg: {team: desperation}}.
+    calibrated: widen the residual spread by the weekly review's spread_k (see review.py);
+    backtests pass False so they grade the raw model."""
     if legs is not None:
         bt = bt.filter(pl.col("leg").is_in(legs))
     bt = main_runs(bt)
@@ -237,6 +240,12 @@ def fit(
             model["team_amt"][t] = float(res_a[m].sum() / (m.sum() + TEAM_SHRINK["amt"]))
         res_a = res_a - np.array([model["team_amt"][t] for t in teams_a])
     model["resid_sd"] = float(np.std(res_a, ddof=Xa.shape[1]))
+    if calibrated:
+        from fantasy_model.review import load_calibration
+
+        cal = load_calibration()
+        model["resid_sd"] *= cal.get("spread_k", 1.0)
+        model["level"] = cal.get("level_s", 1.0)
     return model
 
 
@@ -270,7 +279,8 @@ def max_opponent_bids(
     mean = xs @ model["w_amt"] + np.array([model["team_amt"].get(t, 0.0) for t, _, _ in opponents])
     faab = np.array([f for _, f, _ in opponents], dtype=float)
     share = np.exp(mean[None, :] + model["resid_sd"] * rng.standard_normal((n_sims, len(faab))))
-    amt = np.floor(np.minimum(share, 1.0) * faab[None, :])
+    level = model.get("level", 1.0)  # weekly review's level correction (review.py)
+    amt = np.floor(np.minimum(share * level, 1.0) * faab[None, :])
     bids = np.where(rng.random((n_sims, len(faab))) < p_bid[None, :], amt, 0.0)
     top = bids.max(axis=1)
     if return_winner:
@@ -299,7 +309,7 @@ def price_backtest(
     }
     out = []
     for leg in legs:
-        model = fit(bt, alive, legs=list(range(1, leg)), desp=desp, **fit_kw)
+        model = fit(bt, alive, legs=list(range(1, leg)), desp=desp, calibrated=False, **fit_kw)
         run = main_runs(bt.filter(pl.col("leg") == leg))
         mp = run["processed_at"][0]
         spent = dict(bt.filter(pl.col("won") & (pl.col("processed_at") < mp))

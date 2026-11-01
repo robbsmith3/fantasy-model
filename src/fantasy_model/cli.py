@@ -21,6 +21,7 @@ Setup / utilities:
   validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
   recommend [--assume-chop TEAM_ID] [--csv PATH]
   serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
+  review                        weekly report card: grade past bids/chops, refit calibration
   lineup [--week N] [--team ID] survival lineup: max P(not lowest) vs max points
   live                          live chop odds from in-game scores (Sundays)
                                 bid sheet for the next Sleeper waiver run
@@ -47,6 +48,14 @@ from fantasy_model import (
 )
 
 JOBS = ("daily", "pre_waiver", "post_waiver", "pre_kickoff", "backfill")
+
+
+def run_review(con, league_id: str, season: int) -> str:
+    from fantasy_model import review
+
+    r = review.build(con, "sleeper", league_id, season)
+    c = r["calibration"]
+    return f"auctions={r['summary']['auctions']},spread={c['spread_k']},level={c['level_s']}"
 
 
 def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
@@ -127,6 +136,8 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
                     leg,
                 )
             step(f"sl:{lid}:league", sleeper.sync_league, con, snapshot_id, lid, me)
+            # Weekly report card on the run that just processed; refits data/calibration.json.
+            step(f"sl:{lid}:review", run_review, con, lid, season)
         for lg in config.leagues(cfg, "yahoo"):
             lk = lg["league_id"]
             step(f"yh:{lk}:txns", yahoo.sync_transactions, con, snapshot_id, lk, season)
@@ -298,6 +309,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("live")
+    sub.add_parser("review")
     lu = sub.add_parser("lineup")
     lu.add_argument("--week", type=int)
     lu.add_argument("--team")
@@ -356,6 +368,29 @@ def main(argv: list[str] | None = None) -> None:
         r = evaluate.sim_validation(con, "sleeper", lg["league_id"], season, a.weeks)
         print(r["weeks"].with_columns(pl.selectors.float().round(3)))
         print({k: round(v, 3) for k, v in r["summary"].items()})
+    elif a.cmd == "review":
+        from fantasy_model import review
+
+        lg = config.leagues(config.load_config(), "sleeper")[0]
+        season = con.execute("SELECT max(season) FROM snapshot_run").fetchall()[0][0]
+        r = review.build(con, "sleeper", lg["league_id"], season)
+        s, c = r["summary"], r["calibration"]
+        print(f"{s['auctions']} contested auctions graded (weeks with history)")
+        print(f"  actual price inside the predicted 80% range: {s['coverage']:.0%} (target 80%)")
+        print(f"  median prediction minus actual: ${s['median_bias']:+.0f}")
+        print(f"  named the winner: {s['winner_hit']:.0%} (in top 3: {s['winner_top3']:.0%})")
+        print(
+            f"calibration saved: spread x{c['spread_k']}, level x{c['level_s']}, "
+            f"rival pay x{c['pay_scale']:.2f}  "
+            f"(CRPS {c['crps_before']:.1f} -> {c['crps_after']:.1f})"
+        )
+        print(f"latest run (week {r['latest_leg']}):")
+        for x in r["latest"]:
+            hit = "in range" if x["pred_p10"] <= x["price"] <= x["pred_p90"] else "MISSED"
+            print(
+                f"  {x['player'][:22]:22} ${x['price']:>4}  predicted ~${x['pred_median']:.0f} "
+                f"(${x['pred_p10']:.0f}-{x['pred_p90']:.0f}) {hit:8}  won by {x['winner']}"
+            )
     elif a.cmd == "live":
         from fantasy_model import live, recommend
 

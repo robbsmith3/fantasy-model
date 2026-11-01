@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { type Metrics, money, num, pct, q } from "../api";
+import { ReportCard } from "../components/ReportCard";
 import { Card, Computing, ErrorBox, PageHeader, Stat, Td, Th } from "../components/ui";
 
 const SOURCES = [
@@ -51,6 +52,10 @@ export default function Model() {
   return (
     <>
       <PageHeader title="Model" sub="How well each part has predicted past weeks, trained only on earlier data each time." />
+      <div className="mb-8">
+        <ReportCard />
+      </div>
+      <h2 className="mb-3 text-lg font-semibold tracking-tight">Backtests</h2>
       {rep.isError && <ErrorBox error={rep.error} />}
       {rep.data?.status === "error" && <ErrorBox error={rep.data.error} />}
       {(rep.data?.status === "computing" || (!rep.data && !rep.isError)) && (

@@ -3,6 +3,14 @@ import pytest
 from fantasy_model import config, db
 
 
+@pytest.fixture(autouse=True)
+def isolated_calibration(tmp_path, monkeypatch):
+    """Never read or write the real data/calibration.json from tests."""
+    from fantasy_model import review
+
+    monkeypatch.setattr(review, "CALIBRATION_PATH", tmp_path / "calibration.json")
+
+
 @pytest.fixture
 def con(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SECRETS_DIR", tmp_path / "secrets")
