@@ -42,6 +42,7 @@ from fantasy_model import (
     db,
     espn,
     fantasypros,
+    monitor,
     nflverse,
     projection_model,
     sleeper,
@@ -57,6 +58,25 @@ def run_review(con, league_id: str, season: int) -> str:
     r = review.build(con, "sleeper", league_id, season)
     c = r["calibration"]
     return f"auctions={r['summary']['auctions']},spread={c['spread_k']},level={c['level_s']}"
+
+
+def run_backup() -> bool:
+    """Back up, log the result as a 'backup' run, and notify on failure."""
+    from fantasy_model import backup
+
+    try:
+        r = backup.run()
+    except Exception as e:
+        print(f"BACKUP FAILED: {e}", file=sys.stderr)
+        monitor.record("backup", False, f"{type(e).__name__}: {e}"[:4000])
+        monitor.notify("Chop Desk: backup failed", str(e))
+        return False
+    print(
+        f"backup {r['archive']} ({r['mb']} MB), verified: {r['verified_runs']} job runs "
+        f"inside; pruned {r['pruned']} old backup(s)"
+    )
+    monitor.record("backup", True)
+    return True
 
 
 def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
@@ -325,24 +345,13 @@ def main(argv: list[str] | None = None) -> None:
 
     if a.cmd == "run":
         ok = run_job(a.job)
+        if not ok:
+            monitor.notify("Chop Desk: a job failed", f"{a.job} had errors; see logs/ or the site.")
         if a.job == "post_waiver":  # weekly backup, after the job has released the database
-            from fantasy_model import backup
-
-            try:
-                r = backup.run()
-                print(f"backup {r['archive']} ({r['mb']} MB, verified)")
-            except Exception as e:  # a failed backup is reported, not a failed data job
-                print(f"BACKUP FAILED: {e}", file=sys.stderr)
+            run_backup()  # a failed backup is reported, not a failed data job
         sys.exit(0 if ok else 1)
     if a.cmd == "backup":  # takes the write lock itself, so no shared connection here
-        from fantasy_model import backup
-
-        r = backup.run()
-        print(
-            f"backup {r['archive']} ({r['mb']} MB), verified: {r['verified_runs']} job runs "
-            f"inside; pruned {r['pruned']} old backup(s)"
-        )
-        return
+        sys.exit(0 if run_backup() else 1)
     if a.cmd == "serve":
         from fantasy_model import api
 

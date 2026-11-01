@@ -78,6 +78,34 @@ function Freshness() {
   );
 }
 
+/** Failed or overdue scheduled jobs (from /api/meta), shown above every page. */
+function AlertBanner() {
+  const alerts = useQuery(q.meta()).data?.alerts ?? [];
+  if (alerts.length === 0) return null;
+  const error = alerts.some((a) => a.level === "error");
+  return (
+    <div
+      role="alert"
+      className={clsx(
+        "mb-6 flex items-start gap-3 rounded-xl border px-4 py-3 text-sm",
+        error ? "border-critical/40 bg-critical-wash" : "border-warning/50 bg-warning-wash",
+      )}
+    >
+      <svg viewBox="0 0 24 24" className={clsx("mt-0.5 size-4 shrink-0", error ? "text-critical" : "text-warning-text")}
+        fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 8v5M12 16.5v.5M12 3l9.5 17h-19z" />
+      </svg>
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold">{error ? "A scheduled job failed" : "A scheduled job needs attention"}</div>
+        <ul className="mt-0.5 text-ink-2">
+          {alerts.map((a) => <li key={`${a.level}-${a.job}`}>{a.message}</li>)}
+        </ul>
+      </div>
+      <Link to="/model" className="shrink-0 text-xs font-medium text-accent hover:underline">Job history →</Link>
+    </div>
+  );
+}
+
 export function Layout() {
   const [theme, cycle] = useTheme();
   const [search, setSearch] = useState(false);
@@ -135,6 +163,7 @@ export function Layout() {
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 md:px-8 md:pb-12 md:pt-8">
+          <AlertBanner />
           <Outlet />
         </main>
         <PlayerSheet />
