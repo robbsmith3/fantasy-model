@@ -164,9 +164,11 @@ def league_state(con, ctx: Context, assume_chop: str | None = None) -> LeagueSta
         ]
     )
     gain_weeks = list(range(first, first + 4))
+    bt = bids.bid_table(con, ctx.platform, ctx.league_id, ctx.season)
     model = bids.fit(
-        bids.bid_table(con, ctx.platform, ctx.league_id, ctx.season),
+        bt,
         bids.alive_by_leg(con, ctx.platform, ctx.league_id, ctx.season),
+        needs=bids.need_table(con, ctx.platform, ctx.league_id, ctx.season, bt),
     )
     quality = bids.current_quality(con, ctx.season, ctx.week)
     dumps = dynamics.dump_matrices(vals, ctx, gain_weeks, model, quality)
@@ -211,8 +213,13 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     model, qual = st.model, st.quality
     opp = [(t, ctx.faab[t], 0.5) for t in ctx.alive if t != ctx.me]
     my_faab = ctx.faab[ctx.me]
+    need = bids.current_needs(vals, qual, ctx.slots, [t for t, _, _ in opp], gains["player_id"])
+
+    def opp_needs(pid):
+        return [need[(t, pid)] for t, _, _ in opp]
+
     dist = {
-        pid: PRICE_BUMP * bids.max_opponent_bids(model, qual.get(pid), opp)
+        pid: PRICE_BUMP * bids.max_opponent_bids(model, qual.get(pid), opp, needs=opp_needs(pid))
         for pid in gains["player_id"]
     }
 
@@ -234,7 +241,9 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     deny, rival = {}, {}
     order = gains.sort("d_p_win", descending=True)["player_id"].head(PLAN_POOL).to_list()
     for pid in order:
-        mx, who = bids.max_opponent_bids(model, qual.get(pid), opp, return_winner=True)
+        mx, who = bids.max_opponent_bids(
+            model, qual.get(pid), opp, return_winner=True, needs=opp_needs(pid)
+        )
         loss = np.zeros(len(opp))
         for k, (t, _, _) in enumerate(opp):
             if (who == k).mean() < 0.01:

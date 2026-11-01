@@ -96,8 +96,31 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
 - Privacy pass for the public repo: other managers' team names and `.idea/` removed; git email
   switched to the GitHub noreply address.
 
+## 2026-11-01
+
+### Lineup slots
+- Lineup page and `ffm lineup` list starters by slot (QB, RB, WR, TE, FLEX, DEF). Display only:
+  lineups and pickup values already used the league's two FLEX slots.
+
+### Roster need in the bid model
+- Need = how much a player lifts a team's best lineup (flex included), in perceived PPG
+  (`quality`), from each team's week-w matchup roster. Feature: log1p(need), in both the
+  participation and the amount model.
+- Walk-forward, legs 3-7, 33 contested auctions: CRPS 92.8 -> 63.3 (better in every leg:
+  106/96/108/87/54 -> 73/66/75/49/46); 80% coverage 67% -> 76%; participation log-loss 0.416 ->
+  0.358. A linear need only reached 90.3; need > 0 as a flag 66.8; need capped at 5 61.2 (kept
+  log1p: no extra constant, near-identical score).
+- Named the winner 12% -> 15%, top 3 52% -> 45%: small samples (33), so roughly a wash.
+- Rival pay scale refit 1.45 -> 1.13: the model now expects needy teams to bid high directly.
+- Biggest effect: positions most teams have filled. QBs (one QB slot, no superflex) sold for a
+  median bid of $13, and only 36% of QB bids came from teams that needed one (RB 66%, WR 79%,
+  TE 81%). Previewing a chop, Burrow's predicted market fell $248 -> $21; McBride's rose
+  $169 -> $248 (many teams need a TE).
+- In the rival-pickup simulation, projected lineup gain stands in for need (rosters change as
+  simulated dumps play out).
+
 ## Open questions
-- Naming auction winners is the weakest piece; weekly roster need is the obvious missing input.
+- Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.
 - Yahoo parser is unverified against live responses (raw payloads are kept for re-parsing).
 

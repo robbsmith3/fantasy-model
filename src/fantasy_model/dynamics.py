@@ -24,9 +24,10 @@ from fantasy_model import bids, fit
 DUMP_TOP = 6  # players per chopped roster worth modelling (rest rarely start)
 MIN_GAIN = 0.5  # pts/week: below this a team has no real need, so it isn't a bidder
 # Backtest (2026 legs 3-7, 33 contested players, bid model fit on earlier legs only): the
-# top-expected-bid team was the actual winner 12% of the time (in its top 3: 52%; richest team:
-# 3%; uniform: 9%) and its bid was a median 0.69x the actual price, so payments are scaled up.
-PAY_SCALE = 1.45  # default; the weekly review refits it (review.py -> data/calibration.json)
+# top-expected-bid team was the actual winner 15% of the time (in its top 3: 45%; richest team:
+# 3%; uniform: 9%) and its bid was a median 0.88x the actual price, so payments are scaled up.
+# (Before the roster-need feature: 12%, 52%, 0.69x.)
+PAY_SCALE = 1.13  # default; the weekly review refits it (review.py -> data/calibration.json)
 
 
 def pay_scale() -> float:
@@ -35,11 +36,12 @@ def pay_scale() -> float:
     return load_calibration().get("pay_scale") or PAY_SCALE
 
 
-def expected_bid(model: dict, q, team: str, faab: int) -> tuple[float, float]:
+def expected_bid(model: dict, q, team: str, faab: int, need: float = 0.0) -> tuple[float, float]:
     """(unconditional mean bid, bid if it bids) from the bid model, capped at the team's FAAB.
     The first ranks likely winners; the second is what a winner actually pays (a team that wins
-    pays its real bid, not one averaged with the times it sits out)."""
-    x = bids._x(q, 0.0, 9, 0.5, model.get("feats", ()))
+    pays its real bid, not one averaged with the times it sits out). need: the team's lineup
+    gain from the player (pts/week)."""
+    x = bids._x(q, 0.0, 9, 0.5, model.get("feats", ()), need)
     p = 1 / (1 + np.exp(-(x @ model["w_part"] + model["team_part"].get(team, 0.0))))
     mean = x @ model["w_amt"] + model["team_amt"].get(team, 0.0)
     share = min(float(np.exp(mean + model["resid_sd"] ** 2 / 2)), 1.0)
@@ -74,7 +76,8 @@ def allocate(
                 gain_cache[key] = float(np.mean(g))
             if gain_cache[key] < MIN_GAIN or left.get(t, 0) <= 0:
                 continue
-            rank, pay = expected_bid(model, quality.get(pid), t, left[t])
+            # Projected lineup gain stands in for need here (rosters shift as dumps play out).
+            rank, pay = expected_bid(model, quality.get(pid), t, left[t], gain_cache[key])
             pay = min(pay * scale, left[t])
             if rank > 0 and (best is None or rank > best[1]):
                 best = (t, rank, pay, gain_cache[key])
