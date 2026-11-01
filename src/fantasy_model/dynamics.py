@@ -7,7 +7,7 @@ those whose lineup it improves; that team's FAAB drops by its bid. The recipient
 
 Each dump also records what each recipient spends (S[c, t]); survival.simulate tracks FAAB per
 simulated season, so a team that spent its budget stops collecting (without that, a rich team
-wins every future dump: our first run had Four More Yards at 76% to win the league).
+wins every future dump: our first run had the richest team at 76% to win the league).
 
 Approximations (not yet validated against outcomes): auctions are priced off today's rosters
 and FAAB (a broke team's players don't fall to the next bidder), and only each roster's top
