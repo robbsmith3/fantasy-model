@@ -1,6 +1,8 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { money, num, pct, q } from "../api";
+import { ActionCenter } from "../components/ActionCenter";
+import { AnimatedNumber, PlayerHead, RiskBadge, TeamAvatar } from "../components/brand";
 import { BarList, LineChart } from "../components/charts";
 import { Card, Computing, ErrorBox, PageHeader, Stat } from "../components/ui";
 
@@ -18,24 +20,42 @@ export default function Overview() {
     return v.length ? v[Math.floor(v.length / 2)] : 0;
   });
   const risk = [...alive].sort((a, b) => (b.p_chop_next ?? 0) - (a.p_chop_next ?? 0)).slice(0, 6);
+  const rank = alive.findIndex((t) => t.is_me) + 1;
 
   return (
     <>
       <PageHeader
-        title={me.name}
+        title={
+          <span className="flex items-center gap-3">
+            <TeamAvatar src={me.avatar} name={me.name} size={40} />
+            {me.name}
+          </span>
+        }
         sub={`Week ${L.week} · ${alive.length} teams alive · ${L.chops_left} chops left${L.chop_pending ? " · this week’s chop still to come" : ""}`}
       />
 
+      <Card title="Up next" className="mb-4">
+        <ActionCenter />
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-[1.1fr_1fr]">
-        <Card>
+        <Card glow>
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-[1.4fr_1fr_1fr]">
             <div className="col-span-2 sm:col-span-1">
-              <Stat hero label="Chance to win the league" value={pct(me.p_win)} hint="Simulated to the last chop, incl. rivals’ FAAB pickups" />
+              <Stat
+                hero
+                label="Chance to win the league"
+                value={<AnimatedNumber value={me.p_win} format={(v) => pct(v)} />}
+                hint={`#${rank} of ${alive.length} by odds · simulated to the last chop, incl. rivals’ pickups`}
+              />
             </div>
-            <Stat label={L.chop_pending ? "Chopped this week" : "Chopped next week"} value={pct(me.p_chop_next)} />
-            <Stat label="FAAB left" value={money(me.faab)} />
+            <Stat
+              label={L.chop_pending ? "Chopped this week" : "Chopped next week"}
+              value={<AnimatedNumber value={me.p_chop_next ?? 0} format={(v) => pct(v)} />}
+              hint={<RiskBadge p={me.p_chop_next} />}
+            />
+            <Stat label="FAAB left" value={<AnimatedNumber value={me.faab ?? 0} format={(v) => money(v)} />} />
             <Stat label="Expected chops survived" value={num(me.exp_weeks, 1)} hint={`of ${L.chops_left}`} />
-            <Stat label="League rank by odds" value={`#${alive.findIndex((t) => t.is_me) + 1}`} hint={`of ${alive.length}`} />
           </div>
         </Card>
 
@@ -73,6 +93,8 @@ export default function Overview() {
               label: t.name,
               value: t.p_chop_next ?? 0,
               highlight: t.is_me,
+              icon: <TeamAvatar src={t.avatar} name={t.name} size={24} />,
+              badge: <RiskBadge p={t.p_chop_next} compact />,
               detail: <>FAAB {money(t.faab)} · wins league {pct(t.p_win)}</>,
             }))}
             fmt={(v) => pct(v)}
@@ -82,7 +104,7 @@ export default function Overview() {
 
         <Card
           title="This week’s claim plan"
-          right={<Link to="/waivers" className="text-xs text-accent hover:underline">Full sheet →</Link>}
+          right={<Link to="/waivers" className="text-xs font-medium text-accent hover:underline">Full sheet →</Link>}
         >
           {rec.isError && <ErrorBox error={rec.error} />}
           {rec.data?.status === "computing" && <Computing what="bids" since={rec.data.since} typical="~20s" />}
@@ -94,14 +116,17 @@ export default function Overview() {
               <ol className="divide-y divide-line">
                 {rec.data.data.plan.map((p) => (
                   <li key={p.player_id} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">
-                        {p.order}. {p.player} <span className="text-xs font-normal text-muted">{p.pos}</span>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <PlayerHead id={p.player_id} name={p.player} size={36} />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {p.player} <span className="text-xs font-normal text-muted">{p.pos}</span>
+                        </div>
+                        <div className="text-xs text-muted">#{p.order} · drop {p.drop ?? "—"}</div>
                       </div>
-                      <div className="text-xs text-muted">drop {p.drop ?? "—"}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-semibold tabular">{money(p.bid)}</div>
+                      <div className="text-base font-semibold tabular">{money(p.bid)}</div>
                       <div className="text-xs text-muted tabular">{pct(p.p_get, 0)} to get</div>
                     </div>
                   </li>

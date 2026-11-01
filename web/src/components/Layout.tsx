@@ -3,6 +3,7 @@ import { Link, Outlet } from "@tanstack/react-router";
 import clsx from "clsx";
 import { type ReactNode, useEffect, useState } from "react";
 import { q } from "../api";
+import { Logo } from "./brand";
 
 const I = (d: string) => (
   <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth={1.8}
@@ -80,9 +81,12 @@ export function Layout() {
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[220px_1fr]">
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-surface px-3 py-5 md:flex">
-        <div className="mb-6 px-3">
-          <div className="text-[15px] font-semibold tracking-tight">Chop Desk</div>
-          <div className="text-xs text-muted">Guillotine FAAB model</div>
+        <div className="mb-7 flex items-center gap-2.5 px-2">
+          <Logo />
+          <div>
+            <div className="text-[15px] font-semibold tracking-tight">Chop Desk</div>
+            <div className="text-xs text-muted">Guillotine FAAB model</div>
+          </div>
         </div>
         <nav className="flex flex-col gap-0.5" aria-label="Main">
           {NAV.map((n) => (
@@ -108,7 +112,7 @@ export function Layout() {
 
       <div className="min-w-0">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-page/85 px-4 py-3 backdrop-blur md:hidden">
-          <span className="font-semibold tracking-tight">Chop Desk</span>
+          <span className="flex items-center gap-2 font-semibold tracking-tight"><Logo className="size-6" />Chop Desk</span>
           <div className="flex items-center gap-3">
             <Link to="/players" className="text-ink-2" aria-label="Players">{ICONS.players}</Link>
             <Link to="/model" className="text-ink-2" aria-label="Model">{ICONS.model}</Link>

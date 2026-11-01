@@ -2,11 +2,12 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { num, q } from "../api";
+import { PlayerHead } from "../components/brand";
 import { InjuryBadge, PageHeader, Pos, Segmented } from "../components/ui";
 
 type PosFilter = "ALL" | "QB" | "RB" | "WR" | "TE" | "DEF";
 type Avail = "all" | "free" | "owned";
-const ROW = 44;
+const ROW = 48;
 
 export default function Players() {
   const { data } = useSuspenseQuery(q.players());
@@ -66,7 +67,8 @@ export default function Players() {
                   className="absolute inset-x-0 grid items-center border-b border-line px-3 text-sm hover:bg-surface-2"
                   style={{ gridTemplateColumns: cols, height: ROW, transform: `translateY(${it.start - v.options.scrollMargin}px)` }}
                 >
-                  <span className="min-w-0 truncate">
+                  <span className="flex min-w-0 items-center gap-2.5 truncate">
+                    <PlayerHead id={p.player_id} name={p.name} size={28} />
                     <Pos pos={p.pos} />
                     {p.name}
                     <InjuryBadge status={p.injury} />

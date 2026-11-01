@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-qu
 import clsx from "clsx";
 import { useState } from "react";
 import { type LineupSide, num, pct, q } from "../api";
+import { PlayerHead } from "../components/brand";
 import { Card, ErrorBox, PageHeader, Pos, Segmented, Skeleton, Stat } from "../components/ui";
 
 function Side({ title, side, other, accent }: { title: string; side: LineupSide; other: LineupSide; accent?: boolean }) {
@@ -15,7 +16,8 @@ function Side({ title, side, other, accent }: { title: string; side: LineupSide;
       <ul className="divide-y divide-line">
         {side.starters.map((s) => (
           <li key={s.player_id} className="flex items-center justify-between py-2 text-sm">
-            <span className={clsx(!otherIds.has(s.player_id) && "font-semibold")}>
+            <span className={clsx("flex items-center gap-2.5", !otherIds.has(s.player_id) && "font-semibold")}>
+              <PlayerHead id={s.player_id} name={s.name} size={28} />
               <Pos pos={s.pos} />
               {s.name}
               {!otherIds.has(s.player_id) && <span className="ml-2 text-xs font-normal text-accent">differs</span>}

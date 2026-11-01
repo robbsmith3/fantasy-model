@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /* Specs (dataviz): 2px lines, >=8px end markers with a 2px surface ring, hairline grid, labels in
    text tokens (never the series color), legend for >=2 series, crosshair + one tooltip on lines,
@@ -149,7 +149,15 @@ function Tooltip({ x, y, children }: { x: number; y: number; children: ReactNode
   );
 }
 
-export type BarRow = { key: string; label: ReactNode; value: number; highlight?: boolean; detail?: ReactNode };
+export type BarRow = {
+  key: string;
+  label: ReactNode;
+  value: number;
+  highlight?: boolean;
+  detail?: ReactNode;
+  icon?: ReactNode;
+  badge?: ReactNode;
+};
 
 /** Horizontal bars, one series. Highlighted rows use the accent; the rest recede to neutral. */
 export function BarList({ rows, max, fmt, onSelect }: {
@@ -160,10 +168,16 @@ export function BarList({ rows, max, fmt, onSelect }: {
 }) {
   const top = max ?? Math.max(...rows.map((r) => r.value), 1e-9);
   const [hover, setHover] = useState<string | null>(null);
+  // Bars grow in from the baseline on first paint (CSS transition; off under reduced motion).
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setGrown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   return (
     <ul className="space-y-1.5">
       {rows.map((r) => {
-        const w = Math.max((r.value / top) * 100, r.value > 0 ? 1 : 0);
+        const w = grown ? Math.max((r.value / top) * 100, r.value > 0 ? 1 : 0) : 0;
         return (
           <li key={r.key} className="relative">
             <button
@@ -174,19 +188,23 @@ export function BarList({ rows, max, fmt, onSelect }: {
               onFocus={() => setHover(r.key)}
               onBlur={() => setHover(null)}
               className={clsx(
-                "grid w-full grid-cols-[minmax(0,10rem)_1fr] items-center gap-3 rounded-md px-1 py-1 text-left",
+                "grid w-full grid-cols-[minmax(0,12rem)_1fr] items-center gap-3 rounded-lg px-1.5 py-1.5 text-left",
                 onSelect && "cursor-pointer hover:bg-surface-2",
               )}
             >
-              <span className={clsx("truncate text-sm", r.highlight ? "font-semibold" : "text-ink-2")}>{r.label}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                {r.icon}
+                <span className={clsx("truncate text-sm", r.highlight ? "font-semibold" : "text-ink-2")}>{r.label}</span>
+              </span>
               <span className="flex items-center gap-2">
                 <span className="relative h-4 flex-1">
                   <span
-                    className="absolute inset-y-0 left-0 rounded-r-[4px] transition-[width] duration-300"
+                    className="absolute inset-y-0.5 left-0 rounded-r-[4px] transition-[width] duration-700 ease-out"
                     style={{ width: `${w}%`, background: r.highlight ? "var(--accent)" : "var(--neutral-mark)" }}
                   />
                 </span>
                 <span className="w-14 text-right text-xs tabular text-ink-2">{fmt(r.value)}</span>
+                {r.badge}
               </span>
             </button>
             {hover === r.key && r.detail && (
