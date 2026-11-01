@@ -23,6 +23,7 @@ export type League = {
   weeks: number[];
   chops_left: number;
   me: string;
+  league_id: string;
   teams: Team[];
 };
 export type RosterPlayer = {
@@ -139,6 +140,30 @@ export type Timeline = {
   next_kickoff_week: number | null;
   sunday_main: string | null;
 };
+export type PlayerDetail = {
+  player_id: string;
+  name: string;
+  pos: string;
+  nfl_team: string | null;
+  injury: string | null;
+  owner: string | null;
+  owner_id: string | null;
+  is_mine: boolean;
+  weeks: number[];
+  consensus: Record<string, number>;
+  by_source: Record<string, Record<string, number>>;
+  outcome: {
+    week: number;
+    mean: number;
+    p_dnp: number;
+    p10: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p90: number;
+  } | null;
+  bids: { week: number; team: string; bid: number; won: boolean }[];
+};
 export type Metrics = Record<string, number | string | null>;
 export type ModelReport = {
   weeks: number[];
@@ -182,6 +207,12 @@ export const q = {
     queryOptions({
       queryKey: ["team", id],
       queryFn: () => get<TeamDetail>(`/api/teams/${encodeURIComponent(id)}`),
+      staleTime: 5 * MIN,
+    }),
+  player: (id: string) =>
+    queryOptions({
+      queryKey: ["player", id],
+      queryFn: () => get<PlayerDetail>(`/api/players/${encodeURIComponent(id)}`),
       staleTime: 5 * MIN,
     }),
   players: () =>

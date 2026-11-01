@@ -8,6 +8,7 @@ those endpoints answer {"status": "computing"} until ready, and the UI polls.
 
 from __future__ import annotations
 
+import mimetypes
 import threading
 import time
 import traceback
@@ -24,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fantasy_model import config, fit, recommend
 
 WEB_DIST = config.PROJECT_ROOT / "web" / "dist"
+mimetypes.add_type("application/manifest+json", ".webmanifest")  # PWA manifest
 PLATFORM = "sleeper"
 
 
@@ -251,6 +253,7 @@ def compute_league(con, lid: str) -> dict:
         "weeks": weeks,
         "chops_left": len(ctx.alive) - 1,
         "me": ctx.me,
+        "league_id": lid,
         "teams": teams,
     }
 
@@ -284,6 +287,77 @@ def compute_team(con, lid: str, team_id: str) -> dict:
         "is_me": team_id == ctx.me,
         "weeks": st.sim_weeks,
         "players": players,
+    }
+
+
+def compute_player(con, lid: str, pid: str) -> dict:
+    """One player: projections by source and week, next week's outcome range, league bids."""
+    from fantasy_model import player_sim, value
+
+    ctx = recommend.load_context(con, PLATFORM, lid)
+    first = ctx.week if ctx.chop_pending else ctx.week + 1
+    weeks = list(range(first, first + 4))
+    vals = fit.adjust_for_injury(value.player_values(con, PLATFORM, lid, weeks), weeks)
+    row = vals.filter(pl.col("player_id") == pid)
+    if row.is_empty():
+        raise HTTPException(404, f"no projection for player {pid}")
+    r = row.row(0, named=True)
+    scoring = value.league_scoring(con, PLATFORM, lid)
+    by_source = {}
+    for src in value.SOURCES:
+        sp = value.source_points(con, scoring, src, weeks, ctx.season).filter(
+            pl.col("player_id") == pid
+        )
+        if not sp.is_empty():
+            by_source[src] = {str(w): _f(p, 1) for w, p in sp.select("week", "points").iter_rows()}
+
+    # Outcome range for his next game (skip a bye): the empirical shape for his position and
+    # projection level.
+    game_wk = next((w for w in weeks if (r[f"pts_w{w}"] or 0) > 0), first)
+    mu = r[f"pts_w{game_wk}"] or 0.0
+    outcome = None
+    if mu > 0:
+        bank = player_sim.load_bank(con)
+        ratios = bank.get((r["position"], player_sim.mu_bin(mu)))
+        q = [0.1, 0.25, 0.5, 0.75, 0.9]
+        if ratios is not None:
+            vals_q = [float(mu * np.quantile(ratios, x)) for x in q]
+        else:  # DEF: no bank yet; same rough spread the simulator uses
+            from scipy.stats import norm
+
+            vals_q = [max(float(mu * (1 + 0.5 * norm.ppf(x))), 0.0) for x in q]
+        outcome = {
+            "week": game_wk,
+            "mean": _f(mu, 1),
+            "p_dnp": _f(player_sim.dnp_prob(mu), 3),
+            **{f"p{int(x * 100)}": _f(v, 1) for x, v in zip(q, vals_q, strict=True)},
+        }
+
+    claims = con.execute(
+        """SELECT t.week, t.team_id, t.bid, t.status = 'complete', t.processed_at
+           FROM txn t JOIN txn_player p USING (platform, league_id, transaction_id)
+           WHERE t.platform = ? AND t.league_id = ? AND t.type = 'waiver'
+             AND p.action = 'add' AND p.player_id = ?
+           ORDER BY t.processed_at DESC, t.bid DESC""",
+        [PLATFORM, lid, pid],
+    ).fetchall()
+    return {
+        "player_id": pid,
+        "name": r["full_name"],
+        "pos": r["position"],
+        "nfl_team": r["nfl_team"],
+        "injury": r["injury_status"],
+        "owner": ctx.names.get(r["owner_team_id"]) if r["owner_team_id"] else None,
+        "owner_id": r["owner_team_id"],
+        "is_mine": r["owner_team_id"] == ctx.me,
+        "weeks": weeks,
+        "consensus": {str(w): _f(r[f"pts_w{w}"], 1) for w in weeks},
+        "by_source": by_source,
+        "outcome": outcome,
+        "bids": [
+            {"week": wk, "team": ctx.names.get(t, t), "bid": b, "won": won}
+            for wk, t, b, won, _ in claims
+        ],
     }
 
 
@@ -415,6 +489,10 @@ def create_app() -> FastAPI:
     @app.get("/api/teams/{team_id}")
     def team(team_id: str):
         return versioned("team", compute_team, team_id)
+
+    @app.get("/api/players/{player_id}")
+    def player(player_id: str):
+        return versioned("player", compute_player, player_id)
 
     @app.get("/api/players")
     def players():

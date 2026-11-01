@@ -114,13 +114,20 @@ export function Computing({ what, since, typical }: { what: string; since?: numb
   );
 }
 
-export function Th({ children, right = false, className }: { children?: ReactNode; right?: boolean; className?: string }) {
+/** sticky: pin this column when the table scrolls sideways (phones). */
+export function Th({ children, right = false, className, sticky = false }: {
+  children?: ReactNode;
+  right?: boolean;
+  className?: string;
+  sticky?: boolean;
+}) {
   return (
     <th
       scope="col"
       className={clsx(
         "sticky top-0 z-10 bg-surface px-3 py-2 text-xs font-medium text-muted",
         right ? "text-right" : "text-left",
+        sticky && "left-0 z-20",
         className,
       )}
     >
@@ -128,9 +135,23 @@ export function Th({ children, right = false, className }: { children?: ReactNod
     </th>
   );
 }
-export function Td({ children, right = false, className }: { children?: ReactNode; right?: boolean; className?: string }) {
+export function Td({ children, right = false, className, sticky = false }: {
+  children?: ReactNode;
+  right?: boolean;
+  className?: string;
+  sticky?: boolean;
+}) {
   return (
-    <td className={clsx("px-3 py-2 text-sm", right && "text-right tabular", className)}>{children}</td>
+    <td
+      className={clsx(
+        "px-3 py-2.5 text-sm md:py-2", // taller rows on phones: easier to tap
+        right && "text-right tabular",
+        sticky && "sticky left-0 z-[5] bg-inherit shadow-[1px_0_0_var(--line)] md:shadow-none",
+        className,
+      )}
+    >
+      {children}
+    </td>
   );
 }
 

@@ -132,6 +132,15 @@ minute), Lineup (survival vs max-points lineup), League + team rosters, Players 
 virtualized), Model (backtest report, recent jobs). Frontend dev with hot reload: run
 `uv run ffm serve` and `cd web && npm run dev` (http://localhost:5173 proxies /api).
 
+Handy: Ctrl/⌘+K (or /) searches players, teams and pages; any player name opens his detail
+panel; Waivers → "Copy claims" puts the plan on your clipboard for entering in Sleeper; Live →
+"Alert me if I'm in danger" sends a system notification while the app is open.
+
+**Install as an app.** In Chrome/Edge on this PC, open http://127.0.0.1:8000 and use the install
+icon in the address bar: it gets its own window, icon and offline shell (data is always live).
+On a phone, browsers only install apps (and allow notifications) over HTTPS, so the phone needs
+a secure route to this PC first, e.g. Tailscale (`tailscale serve`) or a Cloudflare tunnel.
+
 The server precomputes league odds, players and the default bid sheet at startup and caches
 everything per data snapshot. While it computes, scheduled jobs wait for the database lock
 (up to 2 minutes) instead of failing.

@@ -4,6 +4,8 @@ import clsx from "clsx";
 import { type ReactNode, useEffect, useState } from "react";
 import { q } from "../api";
 import { Logo } from "./brand";
+import { CommandPalette } from "./CommandPalette";
+import { PlayerSheet } from "./PlayerSheet";
 
 const I = (d: string) => (
   <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth={1.8}
@@ -19,6 +21,7 @@ const ICONS = {
   league: I("M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM17 6h3a3 3 0 01-3 4M7 6H4a3 3 0 003 4"),
   players: I("M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0"),
   model: I("M4 20V10M10 20V4M16 20v-7M22 20H2"),
+  search: I("M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4"),
 };
 
 const NAV: { to: string; label: string; icon: ReactNode; mobile: boolean }[] = [
@@ -77,6 +80,7 @@ function Freshness() {
 
 export function Layout() {
   const [theme, cycle] = useTheme();
+  const [search, setSearch] = useState(false);
   const linkCls = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-ink-2 hover:bg-surface-2 hover:text-ink";
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[220px_1fr]">
@@ -88,6 +92,14 @@ export function Layout() {
             <div className="text-xs text-muted">Guillotine FAAB model</div>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setSearch(true)}
+          className="mb-4 flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm text-muted hover:text-ink"
+        >
+          <span className="flex items-center gap-2">{ICONS.search}Search…</span>
+          <kbd className="rounded border border-line px-1.5 text-[10px]">Ctrl K</kbd>
+        </button>
         <nav className="flex flex-col gap-0.5" aria-label="Main">
           {NAV.map((n) => (
             <Link
@@ -114,6 +126,7 @@ export function Layout() {
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-page/85 px-4 py-3 backdrop-blur md:hidden">
           <span className="flex items-center gap-2 font-semibold tracking-tight"><Logo className="size-6" />Chop Desk</span>
           <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setSearch(true)} className="text-ink-2" aria-label="Search">{ICONS.search}</button>
             <Link to="/players" className="text-ink-2" aria-label="Players">{ICONS.players}</Link>
             <Link to="/model" className="text-ink-2" aria-label="Model">{ICONS.model}</Link>
             <button onClick={cycle} className="text-xs text-ink-2" aria-label={`Theme: ${theme}`}>
@@ -124,6 +137,8 @@ export function Layout() {
         <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 md:px-8 md:pb-12 md:pt-8">
           <Outlet />
         </main>
+        <PlayerSheet />
+        <CommandPalette open={search} setOpen={setSearch} />
       </div>
 
       <nav
