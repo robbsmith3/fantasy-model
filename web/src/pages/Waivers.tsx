@@ -2,8 +2,9 @@ import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-qu
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import clsx from "clsx";
 import { Fragment, useState } from "react";
-import { money, num, pct, q, type SheetRow } from "../api";
+import { money, num, pct, q, type PlanRow, type SheetRow } from "../api";
 import { BidCurve } from "../components/charts";
+import { PlayerLink } from "../components/PlayerSheet";
 import { PlayerHead } from "../components/brand";
 import { Card, Computing, ErrorBox, InjuryBadge, PageHeader, Pos, Stat, Td, Th } from "../components/ui";
 
@@ -65,18 +66,23 @@ export default function Waivers() {
             </div>
           </Card>
 
-          <Card title="Claim plan" sub="Submit in this order. Distinct drops; total stays within your FAAB." pad={false} className="mb-4">
+          <Card
+            title="Claim plan"
+            sub="Submit in this order. Distinct drops; total stays within your FAAB."
+            right={ready.plan.length > 0 && <ClaimActions plan={ready.plan} leagueId={L.league_id} />}
+            pad={false}
+            className="mb-4"
+          >
             {ready.plan.length === 0 ? (
               <p className="px-5 pb-5 text-sm text-ink-2">No claim worth placing.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead><tr className="border-b border-line"><Th>#</Th><Th>Player</Th><Th right>Bid</Th><Th right>Chance to get</Th><Th right>Win prob added</Th><Th>Drop</Th></tr></thead>
+                  <thead><tr className="border-b border-line"><Th sticky>Player</Th><Th right>Bid</Th><Th right>Chance to get</Th><Th right>Win prob added</Th><Th>Drop</Th></tr></thead>
                   <tbody className="divide-y divide-line">
                     {ready.plan.map((p) => (
-                      <tr key={p.player_id}>
-                        <Td className="text-muted">{p.order}</Td>
-                        <Td><span className="flex items-center gap-2.5"><PlayerHead id={p.player_id} name={p.player} size={30} /><span><span className="font-medium">{p.player}</span> <span className="text-xs text-muted">{p.pos}</span></span></span></Td>
+                      <tr key={p.player_id} className="bg-surface">
+                        <Td sticky><span className="flex items-center gap-2.5"><span className="w-4 text-xs text-muted">{p.order}</span><PlayerHead id={p.player_id} name={p.player} size={30} /><span><PlayerLink id={p.player_id} className="font-medium">{p.player}</PlayerLink> <span className="text-xs text-muted">{p.pos}</span></span></span></Td>
                         <Td right className="font-semibold">{money(p.bid)}</Td>
                         <Td right>{pct(p.p_get, 0)}</Td>
                         <Td right>{pct(p.d_p_win, 2)}</Td>
@@ -84,7 +90,7 @@ export default function Waivers() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t border-line"><Td className="text-muted" /><Td className="text-muted">Total if every claim wins</Td><Td right className="font-semibold">{money(ready.plan.reduce((s, p) => s + p.bid, 0))}</Td><Td /><Td /><Td /></tr></tfoot>
+                  <tfoot><tr className="border-t border-line bg-surface"><Td sticky className="text-muted">Total if every claim wins</Td><Td right className="font-semibold">{money(ready.plan.reduce((s, p) => s + p.bid, 0))}</Td><Td /><Td /><Td /></tr></tfoot>
                 </table>
               </div>
             )}
@@ -95,7 +101,7 @@ export default function Waivers() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-line">
-                    <Th className="w-8" /><Th>Player</Th><Th right>+pts</Th><Th right>+win</Th><Th right>Block</Th><Th right>Bid</Th><Th right>Chance</Th><Th right>Market</Th><Th>Drop</Th>
+                    <Th sticky>Player</Th><Th right>+pts</Th><Th right>+win</Th><Th right>Block</Th><Th right>Bid</Th><Th right>Chance</Th><Th right>Market</Th><Th>Drop</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -105,20 +111,19 @@ export default function Waivers() {
                     return (
                       <Fragment key={r.player_id}>
                         <tr
-                          className={clsx("cursor-pointer border-t border-line hover:bg-surface-2", isOpen && "bg-surface-2")}
+                          className={clsx("cursor-pointer border-t border-line", isOpen ? "bg-surface-2" : "bg-surface hover:bg-surface-2")}
                           onClick={() => setOpen(isOpen ? null : r.player_id)}
                         >
-                          <Td>
+                          <Td sticky><span className="flex items-center gap-2.5">
                             <button
                               type="button"
                               aria-expanded={isOpen}
                               aria-label={`Why ${money(r.bid)} for ${r.player}?`}
-                              className={clsx("text-muted transition-transform", isOpen && "rotate-90")}
+                              className={clsx("w-3 text-muted transition-transform", isOpen && "rotate-90")}
                             >
                               ›
                             </button>
-                          </Td>
-                          <Td><span className="flex items-center gap-2.5"><PlayerHead id={r.player_id} name={r.player} size={28} /><span><Pos pos={r.pos} />{r.player}<InjuryBadge status={r.injury} /></span></span></Td>
+                            <PlayerHead id={r.player_id} name={r.player} size={28} /><span><Pos pos={r.pos} /><PlayerLink id={r.player_id}>{r.player}</PlayerLink><InjuryBadge status={r.injury} /></span></span></Td>
                           <Td right>{num(r.pts_gain)}</Td>
                           <Td right>{pct(r.d_p_win, 2)}</Td>
                           <Td right className="text-ink-2">{pct(r.deny, 2)}</Td>
@@ -129,7 +134,7 @@ export default function Waivers() {
                         </tr>
                         {isOpen && (
                           <tr className="bg-surface-2/50">
-                            <td colSpan={9} className="px-4 pb-5 pt-2">
+                            <td colSpan={8} className="px-4 pb-5 pt-2">
                               <WhyBid r={r} lambda100={ready.summary.lambda_per_100} />
                             </td>
                           </tr>
@@ -184,6 +189,55 @@ function WhyBid({ r, lambda100 }: { r: SheetRow; lambda100: number }) {
         <div className="mb-1 text-xs text-muted">Chance you win the claim, by bid</div>
         <BidCurve curve={r.curve} bid={r.bid} pGet={r.p_win_claim} median={r.market_median} />
       </div>
+    </div>
+  );
+}
+
+/** Copy the plan as text for entering claims in Sleeper, and a link to the league. */
+function ClaimActions({ plan, leagueId }: { plan: PlanRow[]; leagueId: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "manual">("idle");
+  const text = [
+    "Waiver claims (FAAB), submit in this order:",
+    ...plan.map((p) => `${p.order}. ${p.player} (${p.pos}): bid $${p.bid}, drop ${p.drop ?? "nobody"}`),
+    `Total if all win: $${plan.reduce((s, p) => s + p.bid, 0)}`,
+  ].join("\n");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+      setTimeout(() => setState("idle"), 2000);
+    } catch {
+      setState("manual"); // clipboard blocked: show the text to copy by hand
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={copy}
+          className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-2"
+        >
+          {state === "copied" ? "Copied ✓" : "Copy claims"}
+        </button>
+        <a
+          href={`https://sleeper.com/leagues/${leagueId}`}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+        >
+          Open Sleeper ↗
+        </a>
+      </div>
+      {state === "manual" && (
+        <textarea
+          readOnly
+          value={text}
+          rows={plan.length + 2}
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-72 rounded-lg border border-line bg-surface p-2 text-xs"
+        />
+      )}
     </div>
   );
 }

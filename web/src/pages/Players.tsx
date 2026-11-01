@@ -3,6 +3,7 @@ import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { num, q } from "../api";
 import { PlayerHead } from "../components/brand";
+import { PlayerLink } from "../components/PlayerSheet";
 import { InjuryBadge, PageHeader, Pos, Segmented } from "../components/ui";
 
 type PosFilter = "ALL" | "QB" | "RB" | "WR" | "TE" | "DEF";
@@ -70,7 +71,7 @@ export default function Players() {
                   <span className="flex min-w-0 items-center gap-2.5 truncate">
                     <PlayerHead id={p.player_id} name={p.name} size={28} />
                     <Pos pos={p.pos} />
-                    {p.name}
+                    <PlayerLink id={p.player_id} className="truncate">{p.name}</PlayerLink>
                     <InjuryBadge status={p.injury} />
                     <span className="ml-1.5 text-xs text-muted">{p.owner ? p.owner : "free"}</span>
                   </span>

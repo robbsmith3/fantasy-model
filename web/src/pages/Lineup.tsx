@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { useState } from "react";
 import { type LineupSide, num, pct, q } from "../api";
 import { PlayerHead } from "../components/brand";
+import { PlayerLink } from "../components/PlayerSheet";
 import { Card, ErrorBox, PageHeader, Pos, Segmented, Skeleton, Stat } from "../components/ui";
 
 function Side({ title, side, other, accent }: { title: string; side: LineupSide; other: LineupSide; accent?: boolean }) {
@@ -19,7 +20,7 @@ function Side({ title, side, other, accent }: { title: string; side: LineupSide;
             <span className={clsx("flex items-center gap-2.5", !otherIds.has(s.player_id) && "font-semibold")}>
               <PlayerHead id={s.player_id} name={s.name} size={28} />
               <Pos pos={s.pos} />
-              {s.name}
+              <PlayerLink id={s.player_id}>{s.name}</PlayerLink>
               {!otherIds.has(s.player_id) && <span className="ml-2 text-xs font-normal text-accent">differs</span>}
             </span>
             <span className="tabular text-ink-2">{num(s.mu)}</span>

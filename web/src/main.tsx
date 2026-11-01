@@ -17,7 +17,12 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },
 });
 
-const root = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: Layout });
+const root = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  component: Layout,
+  // ?player=ID opens the player panel over any page.
+  validateSearch: (s: Record<string, unknown>): { player?: string } =>
+    typeof s.player === "string" && s.player ? { player: s.player } : {},
+});
 // Loaders prefetch on link hover (defaultPreload: "intent"), so navigation feels instant.
 const overview = createRoute({
   getParentRoute: () => root,
@@ -76,3 +81,12 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
+// Installable app: register the service worker in production builds only (dev uses Vite's server).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* not fatal: the site works without it, just not installable/offline */
+    });
+  });
+}

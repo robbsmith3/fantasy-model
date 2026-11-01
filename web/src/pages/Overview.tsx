@@ -4,6 +4,7 @@ import { money, num, pct, q } from "../api";
 import { ActionCenter } from "../components/ActionCenter";
 import { AnimatedNumber, PlayerHead, RiskBadge, TeamAvatar } from "../components/brand";
 import { BarList, LineChart } from "../components/charts";
+import { PlayerLink } from "../components/PlayerSheet";
 import { Card, Computing, ErrorBox, PageHeader, Stat } from "../components/ui";
 
 export default function Overview() {
@@ -120,7 +121,7 @@ export default function Overview() {
                       <PlayerHead id={p.player_id} name={p.player} size={36} />
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">
-                          {p.player} <span className="text-xs font-normal text-muted">{p.pos}</span>
+                          <PlayerLink id={p.player_id}>{p.player}</PlayerLink> <span className="text-xs font-normal text-muted">{p.pos}</span>
                         </div>
                         <div className="text-xs text-muted">#{p.order} · drop {p.drop ?? "—"}</div>
                       </div>

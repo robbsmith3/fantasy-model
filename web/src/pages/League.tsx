@@ -37,13 +37,13 @@ export default function League() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-line">
-                  <Th>Team</Th><Th right>FAAB</Th><Th right>Proj wk {next}</Th><Th right>Chop next</Th><Th right>Chops survived</Th><Th right>Win</Th>
+                  <Th sticky>Team</Th><Th right>FAAB</Th><Th right>Proj wk {next}</Th><Th right>Chop next</Th><Th right>Chops survived</Th><Th right>Win</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {alive.map((t) => (
-                  <tr key={t.team_id} className={clsx("hover:bg-surface-2", t.is_me && "bg-accent-wash")}>
-                    <Td>
+                  <tr key={t.team_id} className={clsx("hover:bg-surface-2", t.is_me ? "bg-accent-wash" : "bg-surface")}>
+                    <Td sticky className={clsx(t.is_me && "bg-[color-mix(in_srgb,var(--accent)_10%,var(--surface))]")}>
                       <Link to="/teams/$teamId" params={{ teamId: t.team_id }} className={clsx("flex items-center gap-2.5 hover:underline", t.is_me && "font-semibold")}>
                         <TeamAvatar src={t.avatar} name={t.name} size={26} />
                         {t.name}

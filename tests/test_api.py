@@ -82,3 +82,28 @@ def test_team_avatars_prefer_custom_team_image(con):
         "1": "https://x/custom.jpg",
         "2": "https://sleepercdn.com/avatars/thumb/def",
     }
+
+
+class _FakeCon:
+    """Just enough of a DuckDB connection for the versioned() cache key."""
+
+    def execute(self, *_):
+        return self
+
+    def fetchall(self):
+        return [("p", "r", "t")]
+
+    def close(self):
+        pass
+
+
+def test_player_endpoint_404s_for_unknown_player(monkeypatch):
+    from fastapi import HTTPException
+
+    def unknown(con, lid, pid):
+        raise HTTPException(404, f"no projection for player {pid}")
+
+    monkeypatch.setattr(api, "compute_player", unknown)
+    monkeypatch.setattr(api, "connect", _FakeCon)
+    monkeypatch.setattr(api, "league_id", lambda: "L")
+    assert TestClient(api.create_app()).get("/api/players/nope").status_code == 404
