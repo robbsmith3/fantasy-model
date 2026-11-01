@@ -1,166 +1,185 @@
-# fantasy-model — Phase 1: data layer
+# Chop Desk
 
-Captures everything the Week B/C models need, across 1 Sleeper + 2 Yahoo guillotine leagues,
-into one DuckDB file. **Priority is snapshotting what disappears** (budgets, pool, injuries,
-projections at bid time) — that becomes the 2027 training set.
+**A FAAB bidding and survival model for guillotine fantasy football leagues.**
+
+In a guillotine league the lowest-scoring team each week is eliminated ("chopped") and its whole
+roster drops onto waivers, where everyone left bids from a single season-long FAAB budget. The
+question each week isn't "who scores the most points" but "how much should I bid to stay off the
+chopping block, and is this player worth more now or is my budget worth more later?"
+
+Chop Desk collects league data on a schedule, projects every player, simulates the rest of the
+season, models how much each rival will bid, and turns it into a claim plan, a lineup and live
+elimination odds, served as a local web app.
+
+```
+   Sleeper · ESPN · FantasyPros · nflverse · Yahoo*
+                        │  scheduled snapshots
+                        ▼
+              DuckDB (raw responses + snapshots)
+                        │
+   projections ─▶ lineup value ─▶ season simulation ─▶ opponent bid model
+                                                              │
+     claim plan · survival lineup · live chop odds · weekly report card  (web app + CLI)
+```
+<sub>*Yahoo support is built but waits on Yahoo's API approval.</sub>
+
+## Features
+
+- **Waiver claim plan:** for each available player, the bid that best trades a higher chance of
+  winning him against the FAAB it costs you later. Claims are planned together (distinct drops,
+  total within budget) and each one explains itself ("adds 8.7 pts over 4 weeks, keeps him from
+  Space Cowboys, market ~$115").
+- **Season simulation:** 20,000 simulated seasons of weekly scores, team-strength drift and
+  rivals spending their FAAB on each chopped roster give every team's chance of being chopped
+  each week and of winning the league.
+- **Opponent bid model:** trained on every past claim in your league, *including losing bids*,
+  with each team's own bidding tendencies.
+- **Projections:** an equal-weight consensus of Sleeper, ESPN, FantasyPros and our own LightGBM
+  model built on nflverse usage, expected points and betting lines, scored with your league's
+  exact rules.
+- **Survival lineup:** starts the players that maximize your chance of *not being the lowest
+  score*, which is not always the max-points lineup.
+- **Live chop odds:** on game days, live scores plus a simulated finish for every unplayed
+  minute, drawn as a "chop line".
+- **Weekly report card:** grades every waiver run against what the model predicted beforehand
+  and refits its corrections automatically.
+- **Web app:** overview, waivers, live, lineup, league, players and model pages; search
+  (Ctrl/⌘+K), player detail panels, one-click "copy claims", dark/light themes, installable.
+
+## Quick start
+
+**Requirements:** Windows with WSL2 (Ubuntu), [uv](https://docs.astral.sh/uv/), Node 20.12+
+(e.g. via [nvm](https://github.com/nvm-sh/nvm)) and a Sleeper league with FAAB waivers.
+
+```bash
+git clone https://github.com/robbsmith3/fantasy-model.git && cd fantasy-model
+uv sync                                              # Python deps + the `ffm` CLI
+cp config/leagues.example.toml config/leagues.toml   # then add your Sleeper ids (below)
+```
+
+In `config/leagues.toml` set your numeric Sleeper user id (from
+`https://api.sleeper.app/v1/user/<username>`) and your league id (from the league URL). Then
+load history and this season so far:
+
+```bash
+uv run ffm idmap                                     # cross-platform player ids
+uv run ffm history 2018 2019 2020 2021 2022 2023 2024 2025 2026
+uv run ffm run pre_waiver                            # rosters, FAAB, projections
+uv run ffm run backfill                              # past scores, bids, projections
+```
+
+Build and start the web app:
+
+```bash
+cd web && npm install && npm run build && cd ..
+uv run ffm serve                                     # http://127.0.0.1:8000
+```
+
+### Scheduling
+
+Data jobs run from Windows Task Scheduler (cron inside WSL misses runs while the VM is asleep).
+From Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File \\wsl.localhost\Ubuntu-24.04\home\<you>\code\fantasy-model\scripts\register_tasks.ps1
+```
+
+| Job | When (local) | What it saves |
+|---|---|---|
+| `daily` | 9am Mon–Wed, Fri–Sat | injury status, practice reports, depth charts |
+| `pre_waiver` | Tue 8pm | rosters, FAAB, scores, projections (Sleeper, ESPN, FantasyPros, our model) |
+| `post_waiver` | Wed 9am | winning *and losing* bids, then the weekly report card |
+| `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections and player status |
+| `history` | Tue 10am | current-season nflverse stats, snaps, schedules |
+
+Set `pre_waiver` and `post_waiver` to bracket your league's waiver run.
+
+## Weekly workflow
+
+| When | What to do |
+|---|---|
+| Sunday | Watch **Live**: the chop line updates every minute during games. |
+| Tuesday night | Open **Waivers** after the 8pm job; review the plan; **Copy claims** into Sleeper. |
+| Before the cutoff | Claims lock at the waiver run's hour (shown on the site with a countdown). |
+| Wednesday | Results post a few minutes after the cutoff; the 9am job grades the run (**Model** page). |
+| Before kickoff | Check **Lineup** for any swap that makes you safer. |
+
+## Commands
+
+```bash
+uv run ffm recommend [--assume-chop TEAM_ID] [--csv PATH]   # bid sheet + claim plan
+uv run ffm lineup [--week N]                                 # survival vs max-points lineup
+uv run ffm live                                              # in-game chop odds
+uv run ffm review                                            # weekly report card
+uv run ffm serve                                             # web app
+uv run ffm health                                            # recent jobs and failures
+uv run ffm --help                                            # everything else
+```
+
+## How accurate is it?
+
+Backtested on the 2026 Sleeper league (18 teams), always predicting each week using only data
+from before it. Reproduce with the commands shown.
+
+| Component | Result | Command |
+|---|---|---|
+| Projections | consensus misses by 5.38 pts per player-week (Sleeper alone: 5.42) | `ffm backtest-model 2 3 4 5 6 7` |
+| Team-score ranges | 80% ranges contain the actual score 80% of the time | `ffm validate-sim 1 2 3 4 5 6 7` |
+| Chop prediction | modestly better than chance (log score −2.52 vs −2.67) | `ffm validate-sim ...` |
+| Winning-bid prices | actual price inside the 80% range 67% of the time; prices run ~$48 above the median prediction | `ffm review` |
+| Naming the auction winner | right 12% of the time (in the top 3: 52%) | `ffm review` |
+
+Week-to-week fantasy scoring is mostly noise, so the gains are in the margins. The weakest piece
+is predicting *which* rival wins a given player.
+
+## Project structure
 
 ```
 src/fantasy_model/
-  schema.py    DuckDB tables + waiver_pool view (raw / entity / snapshot layers)
-  db.py        connect, land_raw (payload stored before parsing), upsert
-  sleeper.py   Sleeper adapter (no auth)
-  yahoo.py     Yahoo adapter + OAuth2 (refresh token in ~/.config/fantasy-model, chmod 600)
-  nflverse.py  player ID map (Sleeper<->Yahoo<->gsis) + weekly history
-  cli.py       `ffm` entry point: snapshot jobs + setup utilities
-config/        leagues.example.toml, yahoo.env (1Password op:// refs, no secrets)
-scripts/       register_tasks.ps1 (Windows Task Scheduler)
+  sleeper.py espn.py fantasypros.py yahoo.py nflverse.py   data adapters
+  schema.py db.py                                          DuckDB schema, raw landing, upserts
+  value.py projection_model.py                             consensus projections + own model
+  fit.py lineup.py                                         lineups, pickup value, survival lineup
+  survival.py player_sim.py dynamics.py                    season simulation, outcomes, rival pickups
+  bids.py recommend.py                                     opponent bid model, claim plan
+  live.py review.py evaluate.py                            live odds, report card, backtests
+  api.py cli.py                                            web API (`ffm serve`), CLI (`ffm`)
+web/                                                       React + TypeScript + Vite frontend
+scripts/register_tasks.ps1                                 Windows Task Scheduler jobs
+config/                                                    league config (example), 1Password refs
+docs/DEVLOG.md                                             developer log: decisions and evidence
 ```
 
-## Step 1 — Drop into the project (WSL Ubuntu)
+Design rules: raw API responses are stored before parsing (a parser bug never loses data);
+snapshots are append-only; projections are stored as stat lines and scored per league; every
+backtest only uses data from before the week it predicts.
+
+## Data sources
+
+- **[Sleeper API](https://docs.sleeper.com/):** leagues, rosters, transactions, live scores.
+  The projections endpoint is unofficial.
+- **ESPN:** public, unofficial fantasy endpoints (projections) and scoreboard (game clocks).
+- **[nflverse](https://nflverse.nflverse.com/):** player stats, snap counts, schedules and betting
+  lines, injury reports, expected fantasy points (ffopportunity), and FantasyPros consensus
+  rankings and projections.
+- **Yahoo Fantasy:** awaiting API access. Screens showing Yahoo data will carry "Fantasy data
+  provided by Yahoo Fantasy" as Yahoo requires.
+
+This is a personal, non-commercial project. Unofficial endpoints can change without notice;
+respect each provider's terms.
+
+## Development
+
 ```bash
-cd ~/code/fantasy-model          # unzip over the uv template; replaces pyproject.toml
-uv sync                          # installs package + `ffm` script into .venv
-printf "data/\nlogs/\nconfig/leagues.toml\n" >> .gitignore
-cp config/leagues.example.toml config/leagues.toml
-uv run pytest && uv run pre-commit run --all-files     # 7 tests, all mocked
+uv run pytest                     # Python tests (all network calls mocked)
+uv run pre-commit run --all-files # ruff lint + format
+cd web && npm run dev             # frontend with hot reload (proxies /api to `ffm serve`)
 ```
 
-## Step 2 — Sleeper (5 min)
-```bash
-curl -s https://api.sleeper.app/v1/user/<username> | python3 -m json.tool | grep user_id
-```
-Put `user_id` and the league id (from the league URL) in `config/leagues.toml`, then:
-```bash
-uv run ffm idmap                 # ~10k rows; required for Yahoo<->Sleeper joins
-uv run ffm run daily             # smoke test #1
-uv run ffm run pre_waiver        # Sleeper part should print league/scores/proj counts
-```
+Secrets stay out of the repo: Yahoo credentials are 1Password references in
+`config/yahoo.env`, and the OAuth token lives in `~/.config/fantasy-model/` (chmod 600).
+Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLOG.md).
 
-## Step 3 — Yahoo OAuth (15 min, one time)
-1. developer.yahoo.com/apps/create (logged into the account in the leagues):
-   API permissions **Fantasy Sports → Read**; Redirect URI `oob` (if rejected, use
-   `https://localhost:8080` and pass `--redirect https://localhost:8080` below).
-2. In 1Password create item **"Yahoo Fantasy API"** with fields `client_id`, `client_secret`
-   (vault path must match `config/yahoo.env`).
-3. Authorize and discover league keys:
-   ```bash
-   op run --env-file=config/yahoo.env -- uv run ffm yahoo-auth
-   uv run ffm yahoo-leagues         # copy the two 2026 league_keys into leagues.toml
-   uv run ffm yahoo-probe <league_key>
-   ```
-4. **Gate:** probe must print `faab_bid present: True` (needs at least one waiver claim in
-   the league). If False, the Yahoo bid labels don't exist and the opponent-bid model
-   trains on Sleeper only — tell me and we'll adjust.
+## License
 
-**Secret tradeoff:** `op run` needs 1Password unlocked, so unattended runs can't use it.
-The client secret + refresh token are therefore copied to
-`~/.config/fantasy-model/yahoo_token.json` (chmod 600, outside the repo, on your encrypted
-disk). Revoke by deleting the Yahoo app. A 1Password service account would remove this,
-but it's overkill here.
-
-## Step 4 — Schedule (Windows Task Scheduler, not WSL cron)
-WSL's VM shuts down when idle, so cron inside it silently misses runs. Task Scheduler
-launches WSL on demand, can **wake the PC**, and **runs missed jobs at next boot**.
-```powershell
-# Windows PowerShell, from the repo via \\wsl$ path or a copy:
-powershell -ExecutionPolicy Bypass -File \\wsl$\Ubuntu-24.04\home\<you>\code\fantasy-model\scripts\register_tasks.ps1
-Start-ScheduledTask -TaskPath '\FantasyModel\' -TaskName daily     # test
-```
-| Task | When (local) | Captures | Why it can't be backfilled |
-|---|---|---|---|
-| `daily` | 9am Mon–Wed, Fri–Sat | injury status, practice, depth chart | Sleeper only serves current status |
-| `pre_waiver` | Tue 8pm | rosters, FAAB left per team, last 2 wks scores, projections wk..wk+4 | pool + budgets at bid time = model inputs |
-| `post_waiver` | Wed 9am | transactions + winning bids, post-claim rosters | labels + next week's starting state |
-| `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections + status | late projection moves = variance signal |
-| `history` | Tue 10am | current-season nflverse stats/snaps/schedules | re-fetchable; kept fresh for Week B |
-
-`daily` skips Thu/Sun because `pre_kickoff` pulls players then → stays inside Sleeper's
-one-call-per-day on `/players/nfl`. **Check each league's waiver run time** and move
-`pre_waiver`/`post_waiver` so they straddle it for *all three* leagues.
-
-## Step 5 — History for Week B (optional now, needed next phase)
-```bash
-uv run ffm history 2018 2019 2020 2021 2022 2023 2024 2025
-```
-Loads weekly player stats, snap counts, schedules (spread/total → implied team totals).
-Only the seasons passed are replaced; with no seasons, `uv run ffm history` refreshes the
-current season (the weekly `history` task does this) and leaves earlier ones intact.
-
-## Operating it
-```bash
-uv run ffm health                # last runs, failures, unmapped Yahoo players, bids captured
-tail -f logs/snapshots.log
-uv run python -c "import duckdb; print(duckdb.connect('data/guillotine.duckdb').sql('from waiver_pool limit 20'))"
-```
-A job exits non-zero and records `ok=false` + traceback in `snapshot_run.error` if any step
-fails, but **other leagues/steps still run** (per-step isolation).
-
-## Phase 2 — Bid recommendations (`ffm recommend`)
-Run Tuesday night after `pre_waiver` (the chopped roster is in the pool by then):
-```bash
-uv run ffm recommend                     # bid sheet + joint claim plan for the next Sleeper run
-uv run ffm recommend --assume-chop 12    # preview: as if team 12 were chopped this week
-uv run ffm recommend --csv bids.csv      # also save the sheet
-```
-How a bid is chosen, module by module:
-
-| Step | Module | What it does | Evidence (2026 Sleeper league) |
-|---|---|---|---|
-| Projections | `value`, `espn`, `fantasypros`, `projection_model` | Equal-weight mean of Sleeper, ESPN, FantasyPros (current week) and our LightGBM model on nflverse usage / expected points / Vegas lines | wks 2-7 MAE 5.38 vs Sleeper 5.42; fitted weights no better (`ffm backtest-model 2 3 4 5 6 7`) |
-| Lineup fit | `fit` | Best legal lineup each week; points a pickup adds net of the cheapest drop; injury discounts | — |
-| Survival | `survival` | Monte Carlo of the remaining chops: weekly score sd 22.7 + team-strength drift (injuries/roles) | Team scores calibrated: 80% intervals cover 80% (`ffm validate-sim 1 2 3 4 5 6 7`) |
-| Opponent bids | `bids` | Per-opponent participation + share-of-FAAB model with shrunken team tendencies | CRPS 103 -> 97 vs league-wide model; ranges a bit narrow (67% vs 80%) |
-| Decision | `recommend` | Bid maximizing P(get) x (win-prob gain - $ x price) + blocking value; joint plan with distinct drops within FAAB | — |
-
-Price of a dollar: median win-prob-per-$ among contested players this week x a discount from
-our own survival curve (a team near the chop spends now; a safe team keeps money's option value).
-
-Keep these fresh: `ffm history` weekly (scheduled), and `ffm run backfill` after a missed week.
-
-**Known model gaps**: rivals' future FAAB pickups aren't simulated (rosters fixed), so P(win) is
-still optimistic for strong teams; injury discounts in `fit.INJURY_AVAIL` are hand-set; competition
-and desperation features showed no gain on 33 auctions but are kept for re-testing.
-
-## The UI (Chop Desk)
-```bash
-cd web && npm install && npm run build && cd ..   # once, and after frontend changes
-uv run ffm serve                                     # http://127.0.0.1:8000
-```
-Pages: Overview (win odds, survival curve, claim-plan preview), Waivers (claim plan + full
-sheet; preview any team's chop from the dropdown), Live (in-game chop odds, refreshes every
-minute), Lineup (survival vs max-points lineup), League + team rosters, Players (searchable,
-virtualized), Model (backtest report, recent jobs). Frontend dev with hot reload: run
-`uv run ffm serve` and `cd web && npm run dev` (http://localhost:5173 proxies /api).
-
-Handy: Ctrl/⌘+K (or /) searches players, teams and pages; any player name opens his detail
-panel; Waivers → "Copy claims" puts the plan on your clipboard for entering in Sleeper; Live →
-"Alert me if I'm in danger" sends a system notification while the app is open.
-
-**Install as an app.** In Chrome/Edge on this PC, open http://127.0.0.1:8000 and use the install
-icon in the address bar: it gets its own window, icon and offline shell (data is always live).
-
-The server precomputes league odds, players and the default bid sheet at startup and caches
-everything per data snapshot. While it computes, scheduled jobs wait for the database lock
-(up to 2 minutes) instead of failing.
-
-## Design rules
-1. **Raw first** — every response lands in `raw_response` before parsing; parser bugs are
-   fixed by re-parsing, never by lost snapshots. Matters most for Yahoo (parser written
-   against documented shape, not yet verified live) and Sleeper projections (unofficial).
-2. **Ephemeral vs re-fetchable** — `*_snapshot` tables are append-only; history is upserted.
-3. **Stats, not points** — projections store stat lines; each league re-scores later.
-4. **Idempotent + rolling 2-week window** — re-runs dedupe; missed runs self-heal.
-5. **Sleeper id is canonical** — `roster_snapshot_canon` maps Yahoo ids via `player_id_map`.
-
-## Known gaps / verify on first real run
-- **Yahoo parser unverified live.** Tested against fixtures in Yahoo's documented JSON shape.
-  If something parses wrong, the raw payload is saved; send me the `raw_response.body`.
-- **Elimination = empty roster** (both platforms). Confirm after the next chop.
-- **Yahoo txns have no week**; derive from `processed_at` vs the NFL schedule in Week B.
-- **Yahoo DEF ids** (100000+) won't map to Sleeper's team-abbrev DEF ids; irrelevant if
-  your Yahoo leagues use the default no-K/DEF guillotine settings.
-- **Projections = Sleeper only so far.** The "average of sources" decision lands in Week B:
-  add a second source (Yahoo projected points or a manual FantasyPros CSV) as another
-  `projection_snapshot.source`, then average.
-- `ffm idmap` and `ffm history` couldn't be run live from my sandbox (GitHub blocked);
-  first run on your machine is the test.
+[MIT](LICENSE)
