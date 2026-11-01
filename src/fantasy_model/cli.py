@@ -22,6 +22,7 @@ Setup / utilities:
   recommend [--assume-chop TEAM_ID] [--csv PATH]
   serve [--host H] [--port P]   local web UI + API (http://127.0.0.1:8000)
   lineup [--week N] [--team ID] survival lineup: max P(not lowest) vs max points
+  live                          live chop odds from in-game scores (Sundays)
                                 bid sheet for the next Sleeper waiver run
 """
 
@@ -296,6 +297,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("eval-projections").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("backtest-model").add_argument("weeks", nargs="+", type=int)
     sub.add_parser("validate-sim").add_argument("weeks", nargs="+", type=int)
+    sub.add_parser("live")
     lu = sub.add_parser("lineup")
     lu.add_argument("--week", type=int)
     lu.add_argument("--team")
@@ -354,6 +356,21 @@ def main(argv: list[str] | None = None) -> None:
         r = evaluate.sim_validation(con, "sleeper", lg["league_id"], season, a.weeks)
         print(r["weeks"].with_columns(pl.selectors.float().round(3)))
         print({k: round(v, 3) for k, v in r["summary"].items()})
+    elif a.cmd == "live":
+        from fantasy_model import live, recommend
+
+        lg = config.leagues(config.load_config(), "sleeper")[0]
+        r = live.live_odds(con, recommend.load_context(con, "sleeper", lg["league_id"]))
+        g = r["games"]
+        print(
+            f"week {r['week']}  |  games: {g['final']} final, {g['live']} live, {g['pre']} to play"
+        )
+        for t in r["teams"]:
+            me = " <- you" if t["is_me"] else ""
+            print(
+                f"  {t['name'][:26]:26} now {t['current']:6.1f}  final ~{t['final_mean']:6.1f} "
+                f"[{t['final_p10']:5.1f}-{t['final_p90']:5.1f}]  P(chop) {t['p_chop']:6.1%}{me}"
+            )
     elif a.cmd == "lineup":
         from fantasy_model import lineup, recommend
 
