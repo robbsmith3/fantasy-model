@@ -121,6 +121,21 @@ Keep these fresh: `ffm history` weekly (scheduled), and `ffm run backfill` after
 still optimistic for strong teams; injury discounts in `fit.INJURY_AVAIL` are hand-set; competition
 and desperation features showed no gain on 33 auctions but are kept for re-testing.
 
+## The UI (Chop Desk)
+```bash
+cd web && npm install && npm run build && cd ..   # once, and after frontend changes
+uv run ffm serve                                     # http://127.0.0.1:8000
+```
+Pages: Overview (win odds, survival curve, claim-plan preview), Waivers (claim plan + full
+sheet; preview any team's chop from the dropdown), Live (in-game chop odds, refreshes every
+minute), Lineup (survival vs max-points lineup), League + team rosters, Players (searchable,
+virtualized), Model (backtest report, recent jobs). Frontend dev with hot reload: run
+`uv run ffm serve` and `cd web && npm run dev` (http://localhost:5173 proxies /api).
+
+The server precomputes league odds, players and the default bid sheet at startup and caches
+everything per data snapshot. While it computes, scheduled jobs wait for the database lock
+(up to 2 minutes) instead of failing.
+
 ## Design rules
 1. **Raw first** — every response lands in `raw_response` before parsing; parser bugs are
    fixed by re-parsing, never by lost snapshots. Matters most for Yahoo (parser written

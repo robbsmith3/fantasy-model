@@ -16,3 +16,5 @@ mlruns/
 logs/
 config/leagues.toml
 .claude/settings.local.json
+web/node_modules/
+web/*.tsbuildinfo
