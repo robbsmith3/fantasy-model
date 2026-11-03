@@ -21,6 +21,8 @@ ok or monitor.notify('Chop Desk: update failed', sys.argv[2])" "$1" "$2"
 build() { uv sync --locked -q && (cd web && npm ci --silent && npm run build --silent) >/dev/null; }
 
 restart_site() {  # only if the logon task exists (scripts/register_tasks.ps1)
+    # Stopping the task doesn't reach the server inside WSL, so end that here or the port stays taken.
+    pkill -f "ffm serve" || true
     "$PS" -NoProfile -Command "\$t = Get-ScheduledTask -TaskPath '\FantasyModel\' -TaskName site \
         -ErrorAction SilentlyContinue; if (\$t) { Stop-ScheduledTask -InputObject \$t; \
         Start-Sleep 2; Start-ScheduledTask -InputObject \$t }" >/dev/null 2>&1 || true

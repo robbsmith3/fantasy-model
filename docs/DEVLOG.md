@@ -167,6 +167,16 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   is lowest, and lineup mistakes are already inside the weekly score SD (fit to actual scores).
   So no rival-lineup model; rerun the script later in the season if habits might have formed.
 
+## 2026-11-03
+
+### Windowless scheduled tasks
+- Console windows opened at logon: PowerShell's `-WindowStyle Hidden` only hides a window that has
+  already opened, and the snapshot tasks ran `wsl.exe` with no hiding at all. All tasks now start
+  through `conhost.exe --headless`. Tested with a temporary task: quoting works, and the processes
+  have no window.
+- Found on the way: `Stop-ScheduledTask` leaves the Linux process running (same with the old
+  launcher), so `update.sh` restarts kept the old server on the port. It now ends `ffm serve` first.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

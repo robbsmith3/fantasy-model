@@ -3,6 +3,7 @@
 # Task Scheduler launches WSL on demand, can wake the PC, and catches up missed runs on boot.
 #
 # Times are Windows LOCAL time; check each league's waiver run time.
+# Tasks start through `conhost --headless` so no console window opens at logon or on catch-up runs.
 # If a task already exists and was registered from an elevated (admin) shell, re-run this elevated.
 
 $Distro  = "Ubuntu-24.04"
@@ -13,7 +14,7 @@ $Folder  = "\FantasyModel\"
 function Register-Snap($Name, $Job, $Trigger, $Override = $null) {
     $cmd = "cd $Project && mkdir -p logs && ~/.local/bin/uv run ffm $Job >> logs/snapshots.log 2>&1"
     if ($Override) { $cmd = "cd $Project && mkdir -p logs && $Override" }
-    $action = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d $Distro -- bash -lc `"$cmd`""
+    $action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless wsl.exe -d $Distro -e bash -lc `"$cmd`""
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -MultipleInstances IgnoreNew
     # New-ScheduledTaskTrigger pins today's UTC offset (e.g. -05:00), so after a DST change every
@@ -41,11 +42,12 @@ Register-Snap "history"     "history"         (New-ScheduledTaskTrigger -Weekly 
 Register-Snap "update" "" (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Wednesday -At 11am) `
     "bash scripts/update.sh >> logs/update.log 2>&1"
 
-# site: `ffm serve` at logon, hidden, restarted if it crashes. Stop it with
-#   Stop-ScheduledTask -TaskPath '\FantasyModel\' -TaskName site
+# site: `ffm serve` at logon, hidden, restarted if it crashes. Stopping the task leaves the server
+# running inside WSL, so stop it with
+#   wsl.exe -d Ubuntu-24.04 -e pkill -f "ffm serve"
 $serve = "cd $Project && mkdir -p logs && ~/.local/bin/uv run ffm serve >> logs/serve.log 2>&1"
-$siteAction = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -WindowStyle Hidden -Command `"wsl.exe -d $Distro -e bash -lc '$serve'`""
+$siteAction = New-ScheduledTaskAction -Execute "conhost.exe" `
+    -Argument "--headless wsl.exe -d $Distro -e bash -lc `"$serve`""
 $siteSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan) `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
@@ -53,6 +55,7 @@ try {
     Register-ScheduledTask -TaskPath $Folder -TaskName "site" -Action $siteAction `
         -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) `
         -Settings $siteSettings -Force -ErrorAction Stop | Out-Null
+    wsl.exe -d $Distro -e pkill -f "ffm serve"  # free the port from any earlier run
     Start-ScheduledTask -TaskPath $Folder -TaskName "site"
     Write-Host "registered $($Folder)site (running now: http://127.0.0.1:8000)"
 } catch {
