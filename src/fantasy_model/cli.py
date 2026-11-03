@@ -303,15 +303,17 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
     plan = out["plan"]
     if not plan.is_empty():
         print(
-            f"\nCLAIM PLAN (joint: distinct drops, total <= ${s['faab']}, each claim valued "
-            "given the ones above may win):"
+            f"\nCLAIM PLAN (joint: claims sharing a drop can't both land, total <= ${s['faab']}, "
+            "each claim valued given the ones above may win):"
         )
         for r in plan.iter_rows(named=True):
             print(
                 f"  {r['order']}. {r['player'][:24]:24} {r['pos']:4} bid ${r['bid']:<4} "
                 f"P(get) {r['p_get']:4.0%}  +win {r['d_p_win']:6.2%}  drop {r['drop']}"
+                + (f"  (only if {r['backup_for']} misses)" if r["backup_for"] else "")
             )
-        print(f"  total if every claim wins: ${plan['bid'].sum()}")
+        most = plan.filter(pl.col("backup_for").is_null())["bid"].sum()
+        print(f"  most this can spend: ${most}")
     if csv:
         sheet.drop("curve").write_csv(csv)  # nested list column doesn't fit CSV
         print(f"wrote {csv}")

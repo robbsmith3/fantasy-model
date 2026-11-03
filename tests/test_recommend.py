@@ -1,6 +1,11 @@
-import numpy as np
+from types import SimpleNamespace
 
-from fantasy_model.recommend import best_bid
+import numpy as np
+import polars as pl
+import pytest
+
+from fantasy_model import recommend
+from fantasy_model.recommend import best_bid, plan_outcomes
 
 
 def test_free_money_bids_just_above_the_field():
@@ -53,3 +58,46 @@ def test_bid_curve_rises_from_zero_and_covers_the_recommended_bid():
     assert bids[0] == 0 and ps[0] == 0.0 and bids[-1] >= 180
     assert all(b >= a for a, b in zip(ps, ps[1:], strict=False))  # P(get) never falls with bid
     assert max(bids) <= 500
+
+
+def _claim(pid, drop, p):
+    return {"player_id": pid, "drop_id": drop, "p_get": p}
+
+
+def test_plan_outcomes_land_one_claim_per_shared_drop():
+    out = plan_outcomes([_claim("a", "x", 0.6), _claim("b", "x", 0.5), _claim("c", "y", 0.5)])
+    assert sum(out.values()) == pytest.approx(1.0)
+    assert out[(0, 2)] == pytest.approx(0.6 * 0.5)  # a lands, so b fails whether or not it won
+    assert out[(1,)] == pytest.approx(0.4 * 0.5 * 0.5)
+    assert not any(0 in k and 1 in k for k in out)
+
+
+def test_claim_plan_backs_up_a_claim_by_sharing_its_drop(monkeypatch):
+    # One expendable player (bn), and too little FAAB for two separate top bids.
+    vals = pl.DataFrame(
+        {
+            "player_id": ["q", "w", "bn", "a", "b"],
+            "full_name": ["Q", "W", "Bench", "A", "B"],
+            "position": ["QB", "WR", "WR", "WR", "WR"],
+            "nfl_team": ["X"] * 5,
+            "injury_status": [None] * 5,
+            "owner_team_id": ["me", "me", "me", None, None],
+            "pts_w1": [20.0, 5.0, 1.0, 20.0, 18.0],
+        }
+    )
+    sheet = pl.DataFrame({"player_id": ["a", "b"], "player": ["A", "B"], "pos": ["WR", "WR"]})
+    monkeypatch.setattr(
+        recommend.survival,
+        "pickup_delta",
+        lambda mu, i, gains, *a: {"d_p_win": float(gains.sum()) / 100},
+    )
+    field = np.random.default_rng(0).uniform(0, 200, 2000)
+    plan = recommend.claim_plan(
+        sheet, vals, SimpleNamespace(me="me", slots=["QB", "WR", "WR", "BN"]), [1],
+        np.zeros((2, 2)), 0, 1.0, None, 0, {"a": field, "b": field}, 0.0, 150,
+    ).to_dicts()  # fmt: skip
+    assert [p["player"] for p in plan] == ["A", "B"]
+    assert plan[0]["backup_for"] is None and plan[1]["backup_for"] == "A"
+    assert plan[0]["drop"] == plan[1]["drop"] == "Bench"
+    assert plan[1]["bid"] < plan[0]["bid"] <= 150  # the higher bid runs first; only one is charged
+    assert plan[0]["bid"] + plan[1]["bid"] > 150  # the point: a separate drop couldn't afford both

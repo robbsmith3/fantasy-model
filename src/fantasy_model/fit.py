@@ -171,10 +171,11 @@ def claim_gain(
     adds: list[str] = (),
     drops: list[str] = (),
     no_drop: set[str] = frozenset(),
+    drop: str | None = None,
 ) -> tuple[list[float], str | None]:
     """Weekly lineup gain from claiming `cand_id` onto team_id's roster after `adds` joined and
-    `drops` left (other claims that won), dropping the cheapest player not in `no_drop`.
-    Returns (gains per week, drop_id)."""
+    `drops` left (other claims that won), dropping `drop` if given, else the cheapest player not
+    in `no_drop`. Returns (gains per week, drop_id)."""
     owned = values.filter(
         ((pl.col("owner_team_id") == team_id) & ~pl.col("player_id").is_in(list(drops)))
         | pl.col("player_id").is_in(list(adds))
@@ -184,7 +185,7 @@ def claim_gain(
     base = {w: best_lineup(rows[w], slots) for w in weeks}
     best = None
     for drop_id in owned["player_id"]:
-        if drop_id in no_drop or drop_id in adds:
+        if drop_id != drop if drop else (drop_id in no_drop or drop_id in adds):
             continue
         gains = []
         for w in weeks:

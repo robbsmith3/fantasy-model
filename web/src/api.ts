@@ -83,7 +83,11 @@ export type PlanRow = {
   d_p_win: number;
   drop: string | null;
   player_id: string;
+  backup_for: string | null; // earlier claim(s) sharing this drop; this one needs them to miss
 };
+/** Most the plan can cost: a backup bids less than its group, and only one of a group can land. */
+export const planSpend = (plan: PlanRow[]) =>
+  plan.reduce((s, p) => s + (p.backup_for ? 0 : p.bid), 0);
 export type Recommendation = {
   summary: {
     team: string;

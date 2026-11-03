@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import { money, q } from "../api";
+import { money, planSpend, q } from "../api";
 import { Countdown } from "./brand";
 
 const when = (iso: string) =>
@@ -85,7 +85,7 @@ export function ActionCenter() {
               ? "Bid plan is computing…"
               : plan.length === 0
                 ? "No claim worth placing right now"
-                : `${plan.length} claim${plan.length > 1 ? "s" : ""} · ${money(plan.reduce((s, p) => s + p.bid, 0))} if all win · top: ${plan[0].player}`) + results
+                : `${plan.length} claim${plan.length > 1 ? "s" : ""} · ${money(planSpend(plan))} at most · top: ${plan[0].player}`) + results
           }
           deadline={{ label: "claims due", at: tl.waiver_cutoff }}
         />

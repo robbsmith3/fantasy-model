@@ -123,7 +123,7 @@ export default function Overview() {
                         <div className="truncate text-sm font-medium">
                           <PlayerLink id={p.player_id}>{p.player}</PlayerLink> <span className="text-xs font-normal text-muted">{p.pos}</span>
                         </div>
-                        <div className="text-xs text-muted">#{p.order} · drop {p.drop ?? "—"}</div>
+                        <div className="text-xs text-muted">#{p.order} · drop {p.drop ?? "—"}{p.backup_for && ` · only if ${p.backup_for} misses`}</div>
                       </div>
                     </div>
                     <div className="text-right">

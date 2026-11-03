@@ -331,54 +331,99 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     }
 
 
+def _group(claim: dict) -> str:
+    """Claims sharing a drop form a group, of which at most one can land."""
+    return claim["drop_id"] or claim["player_id"]
+
+
+def plan_outcomes(chosen: list[dict]) -> dict[tuple[int, ...], float]:
+    """{indices of the claims that land: probability}. Within a group only the first claim to win
+    its bid lands: its drop is then gone, so Sleeper fails the rest of the group at no charge."""
+    from itertools import product
+
+    out: dict[tuple[int, ...], float] = {}
+    for wins in product((True, False), repeat=len(chosen)):
+        prob = float(np.prod([c["p_get"] if w else 1 - c["p_get"]
+                              for c, w in zip(chosen, wins, strict=True)]))  # fmt: skip
+        seen: set[str] = set()
+        landed = []
+        for i, (c, w) in enumerate(zip(chosen, wins, strict=True)):
+            if w and _group(c) not in seen:
+                seen.add(_group(c))
+                landed.append(i)
+        out[tuple(landed)] = out.get(tuple(landed), 0.0) + prob
+    return out
+
+
 def claim_plan(
     sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, faab, deny=None,
     max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL, st_dumps=None,
 ) -> pl.DataFrame:  # fmt: skip
     """Greedy joint plan. Each step re-values every remaining candidate given the claims already
-    chosen: averaged over which of them win (their P(get)), using the roster those wins produce,
-    with a drop no earlier claim uses, and a bid that keeps the plan's total within FAAB."""
-    from itertools import product
-
+    chosen: averaged over which of them land (their P(get)), using the roster those wins produce.
+    A candidate either takes a drop no earlier claim uses or backs up an earlier claim by sharing
+    its drop, and then only counts when that claim misses. Sleeper runs the highest bid first and
+    ties went both ways in league history, so a backup bids strictly less than its group. Since
+    only one claim per group can be charged, the plan's total is the top bid of each group, which
+    stays within FAAB."""
     cands = sheet.head(pool).select("player_id", "player", "pos").rows()
     chosen: list[dict] = []
     for _ in range(max_claims):
-        budget = faab - sum(c["bid"] for c in chosen)
+        tops: dict[str, int] = {}
+        for c in chosen:
+            tops[_group(c)] = max(tops.get(_group(c), 0), c["bid"])
+        budget = faab - sum(tops.values())
+        outcomes = plan_outcomes(chosen)
+        used = {c["drop_id"] for c in chosen}
         best = None
         for pid, name, pos in cands:
-            if budget <= 0 or any(c["player_id"] == pid for c in chosen):
+            if any(c["player_id"] == pid for c in chosen):
                 continue
-            d_win = 0.0
-            for outcome in product((True, False), repeat=len(chosen)):
-                pairs = list(zip(chosen, outcome, strict=True))
-                prob = float(np.prod([c["p_get"] if w else 1 - c["p_get"] for c, w in pairs]))
-                won = [c for c, w in pairs if w]
-                adds = [c["player_id"] for c in won]
-                drops = [c["drop_id"] for c in won]
-                used = {c["drop_id"] for c in chosen}
-                gains, _ = fit.claim_gain(
-                    vals, ctx.me, ctx.slots, gain_weeks, pid, adds, drops, used
+            for shared in (None, *sorted(d for d in used if d)):
+                limit = (
+                    min(c["bid"] for c in chosen if c["drop_id"] == shared) - 1
+                    if shared
+                    else budget
                 )
-                # Base team strength in this outcome includes the earlier wins' gains.
-                bumped = mu.copy()
-                for c in won:
-                    g = np.array(c["gains"])
-                    span = mu.shape[1] - start
-                    g = np.concatenate([g, np.full(max(span - len(g), 0), g.mean())])[:span]
-                    bumped[me_i, start:] += g
-                d = survival.pickup_delta(
-                    bumped, me_i, np.array(gains), sigma, noise, start, st_dumps
+                if limit <= 0:
+                    continue
+                d_win = reached = 0.0
+                for landed, prob in outcomes.items():
+                    won = [chosen[i] for i in landed]
+                    drops = [c["drop_id"] for c in won]
+                    if shared and shared in drops:
+                        continue  # its drop is gone, so this claim fails
+                    gains, _ = fit.claim_gain(
+                        vals, ctx.me, ctx.slots, gain_weeks, pid,
+                        [c["player_id"] for c in won], drops, used, shared,
+                    )  # fmt: skip
+                    # Base team strength in this outcome includes the earlier wins' gains.
+                    bumped = mu.copy()
+                    for c in won:
+                        g = np.array(c["gains"])
+                        span = mu.shape[1] - start
+                        g = np.concatenate([g, np.full(max(span - len(g), 0), g.mean())])[:span]
+                        bumped[me_i, start:] += g
+                    d = survival.pickup_delta(
+                        bumped, me_i, np.array(gains), sigma, noise, start, st_dumps
+                    )
+                    d_win += prob * d["d_p_win"]
+                    reached += prob
+                if reached <= 0:
+                    continue
+                d_win /= reached  # value if this claim lands; the bid only matters when reached
+                dn = (deny or {}).get(pid)
+                b, p_get, ev = best_bid(
+                    np.sort(dist[pid]), d_win, lam, limit, dn[1] if dn else None
                 )
-                d_win += prob * d["d_p_win"]
-            dn = (deny or {}).get(pid)
-            b, p_get, ev = best_bid(np.sort(dist[pid]), d_win, lam, budget, dn[1] if dn else None)
-            if b > 0 and ev > 0 and (best is None or ev > best["ev"]):
-                g0, drop0 = fit.claim_gain(
-                    vals, ctx.me, ctx.slots, gain_weeks, pid,
-                    no_drop={c["drop_id"] for c in chosen},
-                )  # fmt: skip
-                best = {"player_id": pid, "player": name, "pos": pos, "bid": b, "p_get": p_get,
-                        "ev": ev, "d_p_win": d_win, "drop_id": drop0, "gains": g0}  # fmt: skip
+                ev *= reached
+                if b > 0 and ev > 0 and (best is None or ev > best["ev"]):
+                    g0, drop0 = fit.claim_gain(
+                        vals, ctx.me, ctx.slots, gain_weeks, pid, no_drop=used, drop=shared
+                    )
+                    best = {"player_id": pid, "player": name, "pos": pos, "bid": b,
+                            "p_get": p_get, "ev": ev, "d_p_win": d_win, "drop_id": drop0,
+                            "gains": g0}  # fmt: skip
         if best is None:
             break
         chosen.append(best)
@@ -394,6 +439,9 @@ def claim_plan(
                 "d_p_win": c["d_p_win"],
                 "drop": names.get(c["drop_id"]),
                 "player_id": c["player_id"],
+                # The earlier claim(s) this one only runs behind, or None if it stands alone.
+                "backup_for": ", ".join(e["player"] for e in chosen[:i] if _group(e) == _group(c))
+                or None,
             }  # fmt: skip
             for i, c in enumerate(chosen)
         ],
@@ -406,5 +454,6 @@ def claim_plan(
             "d_p_win": pl.Float64,
             "drop": pl.Utf8,
             "player_id": pl.Utf8,
+            "backup_for": pl.Utf8,
         },  # fmt: skip
     )

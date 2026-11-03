@@ -91,3 +91,5 @@ def test_claim_gain_accounts_for_earlier_wins_and_reserved_drops():
         values, "me", slots, [1], "defB", adds=["defA"], drops=["bn1"], no_drop={"bn1"}
     )
     assert gains == [0.0] and drop not in {"bn1", "defA"}
+    # A forced drop is used even if it's reserved or not the cheapest.
+    assert fit.claim_gain(values, "me", slots, [1], "defB", drop="q", no_drop={"q"})[1] == "q"

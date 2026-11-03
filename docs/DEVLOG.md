@@ -177,6 +177,18 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
 - Found on the way: `Stop-ScheduledTask` leaves the Linux process running (same with the old
   launcher), so `update.sh` restarts kept the old server on the port. It now ends `ffm serve` first.
 
+### Backup claims that share a drop
+- The plan forced a different drop on every claim and counted every bid against FAAB, so a second
+  big target was unaffordable (2026 week 9: Bijan Robinson at $37, 1% to get). Now a claim can share
+  an earlier claim's drop. Once one lands the drop is gone, so Sleeper fails the rest at no charge;
+  the plan counts only each group's top bid against FAAB.
+- Evidence: 24 failed 2026 claims say "your roster will have too many players". None bid more than
+  the team's top winning bid that run, which fits highest-bid-first, but ties went both ways, so a
+  backup bids strictly less than its group. Sleeper clears drops on failed claims, so the shared
+  drop itself is inferred from that message. Failed bids are never charged (FAAB = budget - wins for
+  18 of 18 teams), and Sleeper accepts bids summing above the budget (4 team-runs this season).
+- Week 9 plan: Bijan becomes a $442 backup to Amon-Ra St. Brown's $450 (57% to get if reached).
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

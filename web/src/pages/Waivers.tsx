@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-qu
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import clsx from "clsx";
 import { Fragment, useState } from "react";
-import { money, num, pct, q, type PlanRow, type SheetRow } from "../api";
+import { money, num, pct, planSpend, q, type PlanRow, type SheetRow } from "../api";
 import { BidCurve } from "../components/charts";
 import { PlayerLink } from "../components/PlayerSheet";
 import { Countdown, PlayerHead } from "../components/brand";
@@ -70,7 +70,7 @@ export default function Waivers() {
 
           <Card
             title="Claim plan"
-            sub="Submit in this order. Distinct drops; total stays within your FAAB."
+            sub="Claims sharing a drop are backups: once one lands, Sleeper fails the rest at no charge. The most this can spend stays within your FAAB."
             right={ready.plan.length > 0 && <ClaimActions plan={ready.plan} leagueId={L.league_id} />}
             pad={false}
             className="mb-4"
@@ -88,11 +88,11 @@ export default function Waivers() {
                         <Td right className="font-semibold">{money(p.bid)}</Td>
                         <Td right>{pct(p.p_get, 0)}</Td>
                         <Td right>{pct(p.d_p_win, 2)}</Td>
-                        <Td className="text-ink-2">{p.drop ?? "—"}</Td>
+                        <Td className="text-ink-2">{p.drop ?? "—"}{p.backup_for && <span className="block text-xs text-muted">only if {p.backup_for} misses</span>}</Td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t border-line bg-surface"><Td sticky className="text-muted">Total if every claim wins</Td><Td right className="font-semibold">{money(ready.plan.reduce((s, p) => s + p.bid, 0))}</Td><Td /><Td /><Td /></tr></tfoot>
+                  <tfoot><tr className="border-t border-line bg-surface"><Td sticky className="text-muted">Most this can spend</Td><Td right className="font-semibold">{money(planSpend(ready.plan))}</Td><Td /><Td /><Td /></tr></tfoot>
                 </table>
               </div>
             )}
@@ -200,8 +200,8 @@ function ClaimActions({ plan, leagueId }: { plan: PlanRow[]; leagueId: string })
   const [state, setState] = useState<"idle" | "copied" | "manual">("idle");
   const text = [
     "Waiver claims (FAAB), submit in this order:",
-    ...plan.map((p) => `${p.order}. ${p.player} (${p.pos}): bid $${p.bid}, drop ${p.drop ?? "nobody"}`),
-    `Total if all win: $${plan.reduce((s, p) => s + p.bid, 0)}`,
+    ...plan.map((p) => `${p.order}. ${p.player} (${p.pos}): bid $${p.bid}, drop ${p.drop ?? "nobody"}${p.backup_for ? ` (only if ${p.backup_for} misses)` : ""}`),
+    `Most this can spend: $${planSpend(plan)}`,
   ].join("\n");
   const copy = async () => {
     try {
