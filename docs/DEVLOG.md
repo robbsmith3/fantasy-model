@@ -189,6 +189,56 @@ Numbers come from the 2026 Sleeper league (18 teams, $1,000 FAAB) unless noted.
   18 of 18 teams), and Sleeper accepts bids summing above the budget (4 team-runs this season).
 - Week 9 plan: Bijan becomes a $442 backup to Amon-Ra St. Brown's $450 (57% to get if reached).
 
+### Injury and matchup context: tested, nothing shipped
+Five candidate groups in `projection_model.CANDIDATE_GROUPS`, walk-forward against the current
+model (`scripts/experiments/context_features.py`), at Tuesday and in-week horizons. The bar was an
+improved four-source average. **No group passed.**
+
+Four-source average MAE, 2026 week 8 only, difference from baseline (189 players, 3 seeds):
+
+| Group | Tuesday | In-week |
+|---|---|---|
+| Baseline MAE | 5.475 | 5.501 |
+| Teammates out | -0.003 | -0.003 |
+| O-line health | -0.002 | -0.010 |
+| Defense health | 0.000 | -0.009 |
+| Defense quality | +0.007 | 0.000 |
+| Career baseline | -0.010 | -0.013 |
+| All five | -0.002 | -0.007 |
+
+- Seed-to-seed swings reach 0.02, as large as any difference here. Intervals were bootstrapped on
+  one seed: two exclude zero (in-week O-line and defense health), but both groups score slightly
+  worse than baseline on another seed. One week, and FantasyPros' only week 8 snapshot was taken
+  Monday evening, after most games. Its accuracy (5.50) shows no sign of leaked results, but this
+  can't settle anything.
+- Sleeper + ESPN + model, 2026 weeks 1-8 (1,577 player-weeks; a stand-in, not the bar): baseline
+  5.480 Tuesday, 5.492 in-week. Best group -0.004. The only interval excluding zero is defense
+  health on Tuesday, which got worse (+0.003).
+- Our model alone, 2023-25 (about 9,700 player-weeks, retrained every 3 weeks): in-week teammates is
+  the one clear signal, -0.037 MAE (95% -0.052 to -0.023), better in every season. Career -0.016
+  Tuesday and -0.015 in-week, bias -0.12 to -0.05 on Tuesday, interval just reaching zero. O-line,
+  defense health and defense quality: nothing.
+- Why the signal doesn't reach the average: the other sources already price it. When a
+  same-position teammate is newly out (2026, 65 player-weeks): Sleeper bias -0.16, ESPN +0.11, our
+  model -3.58. Adding a correction to our model made the three-source average worse (5.166 to 5.285).
+- Team-first model: not justified. Team totals in-week are off by +4.3 pts with little open usage
+  and -5.7 with a lot, but teammate features alone halve that (+2.9, -3.0), and team MAE barely
+  moves (19.9 to 19.6) against a 23.5-pt residual spread. Open usage explains under 1% of player
+  residuals. The volume shift is real (+2.2 touches, +1.95 pts when a same-position teammate is
+  newly out, 95% 1.44 to 2.48, stable over three seasons) but the market already has it.
+- Bias and MAE disagree on that correction: it cuts bias (-3.58 to -1.83) but out of sample it
+  worsens MAE (2024 3.64 to 3.65, 2025 3.52 to 3.54), since fantasy scores are right-skewed.
+- Bug found: `nfl_injuries.season_type` is empty for 2018-2024, so `season_type = 'REG'` silently
+  dropped those reports. `build_rows` had it too; those columns aren't in production `FEATURES`, and
+  every FEATURES column was unchanged by the fix. Now filters on `game_type`. It would have hidden
+  the teammate result: before the fix, in-week teammates looked like -0.011.
+- Limits: nflverse lines are closing lines, so "Tuesday" sees some later injury news; the sources'
+  history is late-week, so no true Tuesday consensus exists; week 1 has no usual-role baseline;
+  report names match snap counts about 90% of the time (no shared id). Same-position cuts were
+  chosen after seeing results, and aren't in the script. Model-only bias in the 2026 tables (-1.6)
+  is mostly selection: -0.05 over all candidates.
+- Re-test when about 6 weeks have pre-game FantasyPros snapshots (around week 14).
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.
