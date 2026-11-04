@@ -239,6 +239,31 @@ Four-source average MAE, 2026 week 8 only, difference from baseline (189 players
   is mostly selection: -0.05 over all candidates.
 - Re-test when about 6 weeks have pre-game FantasyPros snapshots (around week 14).
 
+### Projections in the bid model: tested, no change
+- Prompted by Ollie Gordon II: projected ~12.7/week, third-best available, but the bid model had him
+  at about $7. Walk-forward on 2026 legs 3-7 (`scripts/experiments/bid_projection.py`), 33 contested
+  auctions, rating players by projection in place of past scoring, roster need rebuilt to match.
+
+| Rating | CRPS (lower is better) | Change, 95% | 80% range holds | Top 15 claimed | Big auctions caught |
+|---|---|---|---|---|---|
+| Past scoring (current) | 65.2 | | 76% | 25/75 | 20/24 |
+| Sleeper + ESPN projection | 68.6 | +3.4 (-5.4, +11.2) | 70% | 27/75 | 21/24 |
+| 50/50 blend | 66.7 | +1.5 (-4.5, +6.6) | 70% | 27/75 | 20/24 |
+| Our Tuesday model | 78.8 | +13.6 (-5.5, +36.1) | 76% | 27/75 | 21/24 |
+
+- Projections don't improve prices, even though the Sleeper/ESPN snapshots postdate each run, which
+  should flatter them. Gordon's week 3 price: $201 actual, $5 current, $16 by projection, $3 blend.
+  The biggest misses (Gordon, Higbee $218 vs $10, Egbuka $223 vs $44) may be sudden role changes;
+  untested, and 33 auctions is too few to go hunting.
+- Chance claimed is badly overstated. The model fits only players somebody claimed, so nobodies
+  score high: 240 expected claims a run against 7 actual (RB/WR/TE, bid above $0). Training
+  participation on the whole reconstructed pool gives 30 expected, and players at 75%+ were claimed
+  83% of the time (18 players; was 4%), but wrecks prices (CRPS 88.7, 55% coverage). So if used,
+  it should drive only the chance-claimed column, with prices left on the current model.
+- The table's ranking holds up for what matters: 83% of $20+ auctions fell in the top 15.
+- Pool is reconstructed from week rosters, missing pickups since the last run. Not all claimed
+  players land in it (44 of 47).
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.
