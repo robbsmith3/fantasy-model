@@ -13,7 +13,7 @@ from fantasy_model import config
 from fantasy_model.schema import SCHEMA
 
 
-def connect(path: Path | None = None, wait_s: float = 120.0) -> duckdb.DuckDBPyConnection:
+def connect(path: Path | None = None, wait_s: float = 300.0) -> duckdb.DuckDBPyConnection:
     """Read-write connection. DuckDB allows one writer and no writer while another process holds
     the file (e.g. `ffm serve` mid-computation), so wait for the lock instead of failing a job."""
     path = Path(path or config.DB_PATH)
