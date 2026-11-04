@@ -294,6 +294,15 @@ Four-source average MAE, 2026 week 8 only, difference from baseline (189 players
   on a separate drop, most it can spend ~$420. $249 is one more than Gridiron Chuckers' whole $248.
   20,000 seasons at $50 balance steps (about a minute): 6,000 flipped the plan between seeds.
 
+### Failed jobs that looked fine
+- `pre_waiver` failed on 2026-11-03 at 8pm (a long experiment held the database), and nothing said
+  so: Task Scheduler showed success and no run was logged.
+- Two causes. `conhost --headless`, used to hide task windows, always exits 0, so tasks now start
+  through a small launcher `register_tasks.ps1` compiles (no window, passes the exit code; tested
+  with exit 7 and 0). And a job that died before logging its run left no trace: it now sends a toast
+  and records the failure, saving it to `data/failed_runs.jsonl` for the site's alert banner and the
+  next run if the database is the thing it can't reach.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

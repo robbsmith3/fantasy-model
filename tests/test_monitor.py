@@ -53,3 +53,36 @@ def test_notify_quotes_text_safely_and_never_raises(monkeypatch, tmp_path):
 
     monkeypatch.setattr(monitor.subprocess, "run", boom)
     assert monitor.notify("x", "y") is False
+
+
+def test_a_crash_with_the_database_locked_is_saved_then_alerted_then_recorded(
+    con, tmp_path, monkeypatch
+):
+    path = tmp_path / "failed_runs.jsonl"
+    monkeypatch.setattr(monitor, "_failed_runs_path", lambda: path)
+    monkeypatch.setattr(monitor, "notify", lambda *a: True)
+
+    def locked(*a, **k):
+        raise OSError("Conflicting lock")
+
+    monkeypatch.setattr(monitor, "record", locked)
+    monitor.report_crash("pre_waiver", "Traceback\nIOException: Conflicting lock")
+    assert path.exists()
+
+    _run(con, "pre_waiver", True, timedelta(days=1))  # the earlier success doesn't hide it
+    assert any(x["level"] == "error" and x["job"] == "pre_waiver" for x in monitor.alerts(con, NOW))
+
+    monitor.flush_failures(con)
+    assert not path.exists()
+    row = con.execute("SELECT ok, error FROM snapshot_run WHERE ok = FALSE").fetchall()
+    assert row[0][1].endswith("Conflicting lock")
+
+
+def test_a_crash_is_recorded_directly_when_the_database_is_free(monkeypatch, tmp_path):
+    calls = []
+    path = tmp_path / "failed_runs.jsonl"
+    monkeypatch.setattr(monitor, "_failed_runs_path", lambda: path)
+    monkeypatch.setattr(monitor, "notify", lambda *a: calls.append(a) or True)
+    monkeypatch.setattr(monitor, "record", lambda *a, **k: calls.append(a))
+    monitor.report_crash("daily", "boom")
+    assert len(calls) == 2 and calls[1][:2] == ("daily", False) and not path.exists()

@@ -86,6 +86,7 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
     cfg = cfg or config.load_config()
     own_con = con is None
     con = con or db.connect()
+    monitor.flush_failures(con)
     started = db.now_utc()
     snapshot_id = f"{started:%Y-%m-%dT%H:%MZ}_{job}"
     state = sleeper.nfl_state(con, snapshot_id)
@@ -360,9 +361,16 @@ def main(argv: list[str] | None = None) -> None:
     a = ap.parse_args(argv)
 
     if a.cmd == "run":
-        ok = run_job(a.job)
-        if not ok:
-            monitor.notify("Chop Desk: a job failed", f"{a.job} had errors; see logs/ or the site.")
+        try:
+            ok = run_job(a.job)
+            if not ok:
+                monitor.notify(
+                    "Chop Desk: a job failed", f"{a.job} had errors; see logs/ or the site."
+                )
+        except Exception:  # died before it could log the run itself (locked database, network)
+            traceback.print_exc()
+            monitor.report_crash(a.job, traceback.format_exc())
+            ok = False
         if a.job == "post_waiver":  # weekly backup, after the job has released the database
             run_backup()  # a failed backup is reported, not a failed data job
         sys.exit(0 if ok else 1)

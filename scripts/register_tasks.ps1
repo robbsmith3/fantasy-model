@@ -3,18 +3,45 @@
 # Task Scheduler launches WSL on demand, can wake the PC, and catches up missed runs on boot.
 #
 # Times are Windows LOCAL time; check each league's waiver run time.
-# Tasks start through `conhost --headless` so no console window opens at logon or on catch-up runs.
+# Tasks start through a small launcher built below, so no console window opens at logon or on
+# catch-up runs and Task Scheduler still sees the job's exit code (`conhost --headless` hid it).
 # If a task already exists and was registered from an elevated (admin) shell, re-run this elevated.
 
 $Distro  = "Ubuntu-24.04"
 $Project = "~/code/fantasy-model"
 $Folder  = "\FantasyModel\"
 
+# Runs wsl.exe with no window and returns its exit code. Built here so nothing binary is in the repo.
+# Not under AppData\Local: packaged apps get a private copy of it that Task Scheduler can't see.
+$Launcher = Join-Path $env:USERPROFILE ".fantasy-model\run-hidden.exe"
+New-Item -ItemType Directory -Force -Path (Split-Path $Launcher) | Out-Null
+Stop-ScheduledTask -TaskPath $Folder -TaskName "site" -ErrorAction SilentlyContinue  # frees the exe
+try {
+    Remove-Item $Launcher -ErrorAction SilentlyContinue
+    Add-Type -OutputAssembly $Launcher -OutputType WindowsApplication -ErrorAction Stop -TypeDefinition @"
+using System;
+using System.Diagnostics;
+public static class RunHidden {
+    public static int Main() {
+        string line = Environment.CommandLine.TrimStart();
+        int end = line.StartsWith("\"") ? line.IndexOf('"', 1) + 1 : line.IndexOf(' ');
+        var info = new ProcessStartInfo("wsl.exe", end < 0 ? "" : line.Substring(end).Trim());
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        using (var p = Process.Start(info)) { p.WaitForExit(); return p.ExitCode; }
+    }
+}
+"@
+} catch {
+    if (-not (Test-Path $Launcher)) { throw }
+    Write-Host "Keeping the existing launcher, it's in use: $($_.Exception.Message)"
+}
+
 # $Job is the ffm subcommand line, e.g. "run daily" or "history"; $Override replaces the whole command.
 function Register-Snap($Name, $Job, $Trigger, $Override = $null) {
     $cmd = "cd $Project && mkdir -p logs && ~/.local/bin/uv run ffm $Job >> logs/snapshots.log 2>&1"
     if ($Override) { $cmd = "cd $Project && mkdir -p logs && $Override" }
-    $action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless wsl.exe -d $Distro -e bash -lc `"$cmd`""
+    $action = New-ScheduledTaskAction -Execute $Launcher -Argument "-d $Distro -e bash -lc `"$cmd`""
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 20) -MultipleInstances IgnoreNew
     # New-ScheduledTaskTrigger pins today's UTC offset (e.g. -05:00), so after a DST change every
@@ -46,8 +73,8 @@ Register-Snap "update" "" (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Wednesda
 # running inside WSL, so stop it with
 #   wsl.exe -d Ubuntu-24.04 -e pkill -f "ffm serve"
 $serve = "cd $Project && mkdir -p logs && ~/.local/bin/uv run ffm serve >> logs/serve.log 2>&1"
-$siteAction = New-ScheduledTaskAction -Execute "conhost.exe" `
-    -Argument "--headless wsl.exe -d $Distro -e bash -lc `"$serve`""
+$siteAction = New-ScheduledTaskAction -Execute $Launcher `
+    -Argument "-d $Distro -e bash -lc `"$serve`""
 $siteSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan) `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
