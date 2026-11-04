@@ -101,3 +101,35 @@ def test_claim_plan_backs_up_a_claim_by_sharing_its_drop(monkeypatch):
     assert plan[0]["drop"] == plan[1]["drop"] == "Bench"
     assert plan[1]["bid"] < plan[0]["bid"] <= 150  # the higher bid runs first; only one is charged
     assert plan[0]["bid"] + plan[1]["bid"] > 150  # the point: a separate drop couldn't afford both
+
+
+def test_market_outlook_ranks_likely_claims_and_skips_qb_def_and_owned():
+    vals = pl.DataFrame(
+        {
+            "player_id": ["star", "depth", "qb", "dst", "mine", "hurt"],
+            "full_name": ["Star", "Depth", "Qb", "Dst", "Mine", "Hurt"],
+            "position": ["WR", "WR", "QB", "DEF", "WR", "RB"],
+            "nfl_team": ["X"] * 6,
+            "injury_status": [None] * 6,
+            "owner_team_id": [None, None, None, None, "t", None],
+            "ros_pts": [50.0, 20.0, 90.0, 40.0, 60.0, 0.0],
+        }
+    )
+    model = {
+        "feats": (), "w_part": np.zeros(8), "w_amt": np.zeros(8), "team_part": {}, "team_amt": {},
+        "resid_sd": 0.3,
+    }  # fmt: skip
+    monkey = recommend.bids._x
+    recommend.bids._x = lambda q, *a: np.array([q, *[0.0] * 7]) if q is not None else np.zeros(8)
+    model["w_part"][0], model["w_amt"][0] = 1.0, 1.0
+    try:
+        out = recommend.market_outlook(
+            vals, model, {"star": 0.0, "depth": -3.0}, [("t", 1000, 0.5), ("u", 100, 0.5)],
+            ["WR", "BN"], {"t": "Team T", "u": "Team U"},
+        ).to_dicts()  # fmt: skip
+    finally:
+        recommend.bids._x = monkey
+    assert [r["player"] for r in out] == ["Star", "Depth"]  # no QB, DEF, owned or zero-value
+    assert out[0]["p_claimed"] > out[1]["p_claimed"] > 0
+    assert out[0]["bid_lo"] <= out[0]["bid"] <= out[0]["bid_hi"] <= 1000
+    assert out[0]["rival"] == "Team T"  # the richer team usually tops the bids

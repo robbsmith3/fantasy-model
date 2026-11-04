@@ -31,7 +31,8 @@ elimination odds, served as a local web app.
   winning him against the FAAB it costs you later. Claims are planned together (claims sharing a
   drop act as backups, since only one can land; the most it can spend stays within budget) and each
   one explains itself ("adds 8.7 pts over 4 weeks, keeps him from
-  the rival most likely to land him, market ~$115").
+  the rival most likely to land him, market ~$115"). A separate table projects bids on the 15 RBs,
+  WRs and TEs rivals are likeliest to claim.
 - **Season simulation:** 20,000 simulated seasons of weekly scores, team-strength drift and
   rivals spending their FAAB on each chopped roster give every team's chance of being chopped
   each week and of winning the league.

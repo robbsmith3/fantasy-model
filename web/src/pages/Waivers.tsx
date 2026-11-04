@@ -148,6 +148,34 @@ export default function Waivers() {
               </table>
             </div>
           </Card>
+
+          <Card
+            title="Projected bids: most likely claimed"
+            sub="The RBs, WRs and TEs rivals are likeliest to claim, and what it would take to win if they do. Comes from past bidding, which doesn't account for injuries."
+            pad={false}
+            className="mt-4"
+          >
+            {ready.market.length === 0 ? (
+              <p className="px-5 pb-5 text-sm text-ink-2">No rival bids projected.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr className="border-b border-line"><Th sticky>Player</Th><Th right>Chance claimed</Th><Th right>Projected bid</Th><Th right>80% range</Th><Th>Likeliest winner</Th></tr></thead>
+                  <tbody className="divide-y divide-line">
+                    {ready.market.map((m) => (
+                      <tr key={m.player_id} className="bg-surface">
+                        <Td sticky><span className="flex items-center gap-2.5"><PlayerHead id={m.player_id} name={m.player} size={28} /><span><Pos pos={m.pos} /><PlayerLink id={m.player_id}>{m.player}</PlayerLink><InjuryBadge status={m.injury} /></span></span></Td>
+                        <Td right>{pct(m.p_claimed, 0)}</Td>
+                        <Td right className="font-semibold">{money(m.bid)}</Td>
+                        <Td right className="text-ink-2">{money(m.bid_lo)}–{money(m.bid_hi)}</Td>
+                        <Td className="text-ink-2">{m.rival} <span className="text-xs text-muted">{pct(m.rival_p, 0)}</span></Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
         </div>
       )}
     </>

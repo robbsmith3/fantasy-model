@@ -419,6 +419,10 @@ def compute_recommend(lid: str, assume_chop: str | None) -> dict:
             {k: (_f(v) if isinstance(v, float) else v) for k, v in r.items()}
             for r in out["plan"].iter_rows(named=True)
         ],
+        "market": [
+            {k: (_f(v) if isinstance(v, float) else v) for k, v in r.items()}
+            for r in out["market"].iter_rows(named=True)
+        ],
     }
 
 

@@ -85,6 +85,19 @@ export type PlanRow = {
   player_id: string;
   backup_for: string | null; // earlier claim(s) sharing this drop; this one needs them to miss
 };
+export type MarketRow = {
+  player: string;
+  pos: string;
+  team: string | null;
+  injury: string | null;
+  p_claimed: number; // chance any rival bids
+  bid: number; // winning rival bid when one does (median; bid_lo-bid_hi is the 80% range)
+  bid_lo: number;
+  bid_hi: number;
+  rival: string;
+  rival_p: number;
+  player_id: string;
+};
 /** Most the plan can cost: a backup bids less than its group, and only one of a group can land. */
 export const planSpend = (plan: PlanRow[]) =>
   plan.reduce((s, p) => s + (p.backup_for ? 0 : p.bid), 0);
@@ -103,6 +116,7 @@ export type Recommendation = {
   };
   sheet: SheetRow[];
   plan: PlanRow[];
+  market: MarketRow[];
 };
 export type LineupSide = {
   starters: { slot: string; player_id: string; name: string; pos: string; mu: number }[];

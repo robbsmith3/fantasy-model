@@ -19,6 +19,8 @@ PRICE_BUMP = 1.0
 CONTESTED_MIN = 25  # market median ($) for a player to count when pricing a dollar
 MAX_DEF = 2  # DEF rows kept on the sheet
 MAX_CLAIMS, PLAN_POOL = 4, 8  # joint plan: up to 4 claims chosen from the top 8 sheet rows
+MARKET_TOP, MARKET_POOL = 15, 100  # market table: top 15 of the 100 best available by projection
+MARKET_SKIP = ("QB", "DEF")
 DEFAULT_LAMBDA = 0.0002  # win prob per $ when nothing is contested (~2% per $100; 2026 previews)
 
 
@@ -194,8 +196,63 @@ def league_state(con, ctx: Context, assume_chop: str | None = None) -> LeagueSta
     )
 
 
+def market_outlook(
+    vals: pl.DataFrame, model: dict, quality: dict, opp: list, slots: list[str], names: dict,
+    top: int = MARKET_TOP, pool: int = MARKET_POOL,
+) -> pl.DataFrame:  # fmt: skip
+    """Available players rivals are most likely to claim, by the bid model: the chance any rival
+    bids, and the winning bid when one does (median and 80% range). Rivals only, so our claims
+    don't move it."""
+    cands = (
+        vals.filter(
+            pl.col("owner_team_id").is_null()
+            & ~pl.col("position").is_in(MARKET_SKIP)
+            & (pl.col("ros_pts") > 0)
+        )
+        .sort("ros_pts", descending=True)
+        .head(pool)
+    )
+    teams = [t for t, _, _ in opp]
+    need = bids.current_needs(vals, quality, slots, teams, cands["player_id"])
+    rows = []
+    for r in cands.iter_rows(named=True):
+        pid = r["player_id"]
+        mx, who = bids.max_opponent_bids(
+            model, quality.get(pid), opp, return_winner=True, needs=[need[(t, pid)] for t in teams]
+        )
+        won = mx[mx > 0]
+        if not len(won):
+            continue
+        shares = np.bincount(who[who >= 0], minlength=len(opp)) / len(won)
+        k = int(shares.argmax())
+        rows.append(
+            {
+                "player": r["full_name"],
+                "pos": r["position"],
+                "team": r["nfl_team"],
+                "injury": r["injury_status"],
+                "p_claimed": len(won) / len(mx),
+                "bid": float(np.median(won)),
+                "bid_lo": float(np.quantile(won, 0.1)),
+                "bid_hi": float(np.quantile(won, 0.9)),
+                "rival": names.get(teams[k], teams[k]),
+                "rival_p": float(shares[k]),
+                "player_id": pid,
+            }
+        )
+    rows.sort(key=lambda x: (-x["p_claimed"], -x["bid"]))
+    return pl.DataFrame(
+        rows[:top],
+        schema={
+            "player": pl.Utf8, "pos": pl.Utf8, "team": pl.Utf8, "injury": pl.Utf8,
+            "p_claimed": pl.Float64, "bid": pl.Float64, "bid_lo": pl.Float64, "bid_hi": pl.Float64,
+            "rival": pl.Utf8, "rival_p": pl.Float64, "player_id": pl.Utf8,
+        },
+    )  # fmt: skip
+
+
 def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int = 300) -> dict:
-    """Returns {'summary', 'sheet', 'plan'} for the next waiver run."""
+    """Returns {'summary', 'sheet', 'plan', 'market'} for the next waiver run."""
     st = league_state(con, ctx, assume_chop)
     vals, gain_weeks, mu, sigma = st.vals, st.gain_weeks, st.mu, st.sigma
     noise, base, me_i, start, dumps = st.noise, st.base, st.me_i, st.start, st.dumps
@@ -315,6 +372,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     )
     return {
         "plan": plan,
+        "market": market_outlook(vals, model, qual, opp, ctx.slots, ctx.names),
         "summary": {
             "team": ctx.names[ctx.me],
             "faab": my_faab,

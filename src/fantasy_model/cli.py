@@ -314,6 +314,12 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
             )
         most = plan.filter(pl.col("backup_for").is_null())["bid"].sum()
         print(f"  most this can spend: ${most}")
+    print("\nPROJECTED BIDS, most likely claimed by rivals (no QB/DEF):")
+    for r in out["market"].iter_rows(named=True):
+        print(
+            f"  {r['player'][:24]:24} {r['pos']:3} {r['p_claimed']:4.0%} claimed  "
+            f"bid ${r['bid']:<4.0f} (${r['bid_lo']:.0f}-${r['bid_hi']:.0f})  {r['rival']}"
+        )
     if csv:
         sheet.drop("curve").write_csv(csv)  # nested list column doesn't fit CSV
         print(f"wrote {csv}")
