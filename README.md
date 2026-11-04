@@ -28,7 +28,8 @@ elimination odds, served as a local web app.
 ## Features
 
 - **Waiver claim plan:** for each available player, the bid that best trades a higher chance of
-  winning him against the FAAB it costs you later. Claims are planned together (claims sharing a
+  winning him against what that FAAB could buy later, simulated at each balance so each extra
+  dollar costs more than the last, with a walk-away price. Claims are planned together (claims sharing a
   drop act as backups, since only one can land; the most it can spend stays within budget) and each
   one explains itself ("adds 8.7 pts over 4 weeks, keeps him from
   the rival most likely to land him, market ~$115"). A separate table projects bids on the 15 RBs,

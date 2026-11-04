@@ -57,6 +57,8 @@ export type Player = {
 };
 export type Players = { weeks: number[]; players: Player[] };
 export type SheetRow = {
+  money_cost: number; // win probability this bid costs in later buying power
+  walk_away: number; // the most he is worth, counting that cost
   player: string;
   pos: string;
   team: string | null;
@@ -83,6 +85,7 @@ export type PlanRow = {
   d_p_win: number;
   drop: string | null;
   player_id: string;
+  walk_away: number | null;
   backup_for: string | null; // earlier claim(s) sharing this drop; this one needs them to miss
 };
 export type MarketRow = {
@@ -110,8 +113,8 @@ export type Recommendation = {
     assume_chop: string | null;
     p_win: number;
     p_chop_next: number;
-    lambda_per_100: number;
-    faab_discount: number;
+    cost_100: number; // win probability lost by spending $100
+    cost_half: number; // ... by spending half our FAAB
     sigma: number;
   };
   sheet: SheetRow[];

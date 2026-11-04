@@ -264,6 +264,36 @@ Four-source average MAE, 2026 week 8 only, difference from baseline (189 players
 - Pool is reconstructed from week rosters, missing pickups since the last run. Not all claimed
   players land in it (44 of 47).
 
+### Value of FAAB and the 2025 season: live
+- Imported the finished 2025 league (`ffm import-league`): same league, 18 teams, $1,000, no DEF slot;
+  545 claims, 16 of 18 managers carry over. This week's plan is unchanged by the import.
+- 2025 prices collapse late. Top winning bid by week: 3 $925, 5 $672, 7 $212, 9 $146, 10 $137, 11 $34,
+  12 $15, 13 $12. Players rated 20+ went for $10-34 in weeks 11-13 while one team sat on $506 (chopped
+  week 14, still holding it). The top four finishers held $5-59 at week 12. Rank correlation of FAAB
+  with weeks survived: +0.04 at week 8, -0.54 at week 12 (10 and 6 teams, one season).
+- `faab_value.py` simulates the season with rivals bidding shares of their remaining money and us
+  by a simple rule, giving win probability by balance. Measured pickup fade 0.63, 0.90, 0.89; late
+  rival prices x0.3 from 2025 (12 auctions). Rival spend per round from here 956, 565, 407, 133, 87,
+  59; 2025 from the same stage 755, 401, 524, 95, 23, 18.
+- Cost of spending from $500, flat price vs curve: $100 0.53% vs 0.34%, $200 1.07% vs 2.30%, $300 1.60%
+  vs 4.43%, $400 2.13% vs 7.96%, $450 2.40% vs 10.65%. Plan changes from Amon-Ra St. Brown $450 and
+  Bijan Robinson $442 to $249 and $191. Same on three random seeds (walk-away $367-377).
+- Sensitive to pickup fade: no fade $107, fade 0.5 $375. Late-price scale barely moves it: $249 at
+  0.15, 0.3 and 1.0. Absolute P(win) is too high (36.6% vs 19.1%), since rivals don't react to us
+  and rosters stay fixed, so only differences are used. Shortcut (player value minus money cost)
+  checks out against simulating both: within about 1.4 points, a little conservative.
+- Prices: adding 2025 doesn't pass. CRPS, 2026 runs 3-7: 65.4 current; 87.1 with 2025; 78.0 with 2025
+  and a leg feature; LightGBM 66.6, with 2025 72.2. LightGBM with 2025 was better in runs 6-7 (41.5,
+  42.2 vs 52.9, 54.4), but that's picked after the fact; re-test as runs accumulate. Across 2025,
+  the linear model forecast each late run's top bid at 3-4x the real one.
+- Claim chance: a player-level model on the whole pool, 2025 + 2026 training, expects 7.4 claims per
+  run against 7.4 actual (was 240), catching 26 of 37 claims in its top 15.
+- Live: bids use the curve, with a walk-away price; prices stay on the 2026 model; chance claimed
+  uses the claim model; player value beyond projected weeks now leaves out bye weeks, which lifts
+  Bijan Robinson (+5.82% from +4.54%). Live week 9 plan: Bijan $224-249, Amon-Ra St. Brown $152-156
+  on a separate drop, most it can spend ~$420. $249 is one more than Gridiron Chuckers' whole $248.
+  20,000 seasons at $50 balance steps (about a minute): 6,000 flipped the plan between seeds.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

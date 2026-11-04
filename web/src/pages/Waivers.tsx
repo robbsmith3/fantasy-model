@@ -27,7 +27,7 @@ export default function Waivers() {
     <>
       <PageHeader
         title="Waivers"
-        sub="Bids that trade win probability against FAAB. Each claim in the plan is valued given the ones above it may win."
+        sub="Bids that trade win probability against what your FAAB could buy later. Each claim in the plan is valued given the ones above it may win."
         right={
           <label className="flex items-center gap-2 text-sm">
             <span className="text-ink-2">Preview</span>
@@ -53,9 +53,9 @@ export default function Waivers() {
       {rec.isError && <ErrorBox error={rec.error} />}
       {rec.data?.status === "error" && <ErrorBox error={rec.data.error} />}
       {rec.data?.status === "computing" && (
-        <div className="mb-4"><Computing what="the bid sheet" since={rec.data.since} typical="~20s" /></div>
+        <div className="mb-4"><Computing what="the bid sheet" since={rec.data.since} typical="~1 min" /></div>
       )}
-      {!rec.data && !rec.isError && <Computing what="the bid sheet" typical="~20s" />}
+      {!rec.data && !rec.isError && <Computing what="the bid sheet" typical="~1 min" />}
 
       {ready && (
         <div className={clsx("transition-opacity", stale && "opacity-50")}>
@@ -63,8 +63,8 @@ export default function Waivers() {
             <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
               <Stat label="Chance to win" value={pct(ready.summary.p_win)} />
               <Stat label="FAAB" value={money(ready.summary.faab)} />
-              <Stat label="$100 of FAAB is worth" value={pct(ready.summary.lambda_per_100, 2)} hint="of win probability" />
-              <Stat label="A saved $ is worth" value={pct(ready.summary.faab_discount, 0)} hint="of a $ spent now" />
+              <Stat label="Spending $100 costs" value={pct(ready.summary.cost_100, 2)} hint="of win probability" />
+              <Stat label="Spending half costs" value={pct(ready.summary.cost_half, 2)} hint="the more you spend, the more each $ costs" />
             </div>
           </Card>
 
@@ -80,7 +80,7 @@ export default function Waivers() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead><tr className="border-b border-line"><Th sticky>Player</Th><Th right>Bid</Th><Th right>Chance to get</Th><Th right>Win prob added</Th><Th>Drop</Th></tr></thead>
+                  <thead><tr className="border-b border-line"><Th sticky>Player</Th><Th right>Bid</Th><Th right>Chance to get</Th><Th right>Win prob added</Th><Th right>Walk away</Th><Th>Drop</Th></tr></thead>
                   <tbody className="divide-y divide-line">
                     {ready.plan.map((p) => (
                       <tr key={p.player_id} className="bg-surface">
@@ -88,22 +88,23 @@ export default function Waivers() {
                         <Td right className="font-semibold">{money(p.bid)}</Td>
                         <Td right>{pct(p.p_get, 0)}</Td>
                         <Td right>{pct(p.d_p_win, 2)}</Td>
+                        <Td right className="text-ink-2">{p.walk_away == null ? "—" : money(p.walk_away)}</Td>
                         <Td className="text-ink-2">{p.drop ?? "—"}{p.backup_for && <span className="block text-xs text-muted">only if {p.backup_for} misses</span>}</Td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t border-line bg-surface"><Td sticky className="text-muted">Most this can spend</Td><Td right className="font-semibold">{money(planSpend(ready.plan))}</Td><Td /><Td /><Td /></tr></tfoot>
+                  <tfoot><tr className="border-t border-line bg-surface"><Td sticky className="text-muted">Most this can spend</Td><Td right className="font-semibold">{money(planSpend(ready.plan))}</Td><Td /><Td /><Td /><Td /></tr></tfoot>
                 </table>
               </div>
             )}
           </Card>
 
-          <Card title="Every candidate on its own" sub="Tap a row for why: lineup points added (next 4 weeks), win probability added, and blocking value." pad={false}>
+          <Card title="Every candidate on its own" sub="Tap a row for why: lineup points added (next 4 weeks), win probability added, and blocking value. Walk away: the most he’s worth once you count what the money could buy later." pad={false}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-line">
-                    <Th sticky>Player</Th><Th right>+pts</Th><Th right>+win</Th><Th right>Block</Th><Th right>Bid</Th><Th right>Chance</Th><Th right>Market</Th><Th>Drop</Th>
+                    <Th sticky>Player</Th><Th right>+pts</Th><Th right>+win</Th><Th right>Block</Th><Th right>Bid</Th><Th right>Chance</Th><Th right>Market</Th><Th right>Walk away</Th><Th>Drop</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -132,12 +133,13 @@ export default function Waivers() {
                           <Td right className="font-semibold">{money(r.bid)}</Td>
                           <Td right>{pct(r.p_win_claim, 0)}</Td>
                           <Td right className="text-ink-2">{money(r.market_median)}</Td>
+                          <Td right className="text-ink-2">{money(r.walk_away)}</Td>
                           <Td className="text-ink-2">{r.drop}</Td>
                         </tr>
                         {isOpen && (
                           <tr className="bg-surface-2/50">
-                            <td colSpan={8} className="px-4 pb-5 pt-2">
-                              <WhyBid r={r} lambda100={ready.summary.lambda_per_100} />
+                            <td colSpan={9} className="px-4 pb-5 pt-2">
+                              <WhyBid r={r} />
                             </td>
                           </tr>
                         )}
@@ -151,7 +153,7 @@ export default function Waivers() {
 
           <Card
             title="Projected bids: most likely claimed"
-            sub="The RBs, WRs and TEs rivals are likeliest to claim, and what it would take to win if they do. Comes from past bidding, which doesn't account for injuries."
+            sub="The RBs, WRs and TEs rivals are likeliest to claim, and what it would take to win if they do. Comes from 2025 and 2026 bidding, which doesn't account for injuries or sudden role changes."
             pad={false}
             className="mt-4"
           >
@@ -182,8 +184,7 @@ export default function Waivers() {
   );
 }
 
-function WhyBid({ r, lambda100 }: { r: SheetRow; lambda100: number }) {
-  const cost = (r.bid / 100) * lambda100; // win prob the money could buy later
+function WhyBid({ r }: { r: SheetRow }) {
   const reasons = [
     <>Adds <b>{num(r.pts_gain)} points</b> to your starting lineup over the next 4 weeks.</>,
     <>That’s <b>+{pct(r.d_p_win, 2)}</b> on your chance to win the league.</>,
@@ -202,7 +203,8 @@ function WhyBid({ r, lambda100 }: { r: SheetRow; lambda100: number }) {
     ),
     <>
       At <b>{money(r.bid)}</b> you get him <b>{pct(r.p_win_claim, 0)}</b> of the time. Bidding more raises that, but every
-      extra dollar is win chance you could spend on a later dump; {money(r.bid)} is worth about {pct(cost, 2)} of it.
+      extra dollar is win chance you could spend on a later dump; {money(r.bid)} costs about {pct(r.money_cost, 2)} of it.
+      Above <b>{money(r.walk_away)}</b> he isn’t worth the money.
     </>,
   ].filter(Boolean);
   return (

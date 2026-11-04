@@ -196,6 +196,22 @@ def sync_transactions(con, snapshot_id: str, league_id: str, season: int, leg: i
     return len(t_rows)
 
 
+def import_past_league(con, league_id: str, my_user_id: str | None = None) -> dict:
+    """Load a finished league's rosters, weekly scores and transactions, for models to learn from.
+    Stored under a snapshot id older than any live one and with no job run, so nothing that reads
+    the newest snapshot or run sees it."""
+    lg = requests.get(f"{BASE}/league/{league_id}", timeout=30).json()
+    season = int(lg["season"])
+    if lg.get("status") != "complete":
+        raise ValueError(f"league {league_id} isn't finished (status {lg.get('status')})")
+    snapshot_id = f"{season}-12-31T00:00Z_import"
+    sync_league(con, snapshot_id, league_id, my_user_id)
+    weeks = range(1, int(lg["settings"]["last_scored_leg"]) + 1)
+    scores = sum(sync_week_scores(con, snapshot_id, league_id, season, w) for w in weeks)
+    txns = sum(sync_transactions(con, snapshot_id, league_id, season, w) for w in weeks)
+    return {"season": season, "weeks": len(weeks), "team_weeks": scores, "transactions": txns}
+
+
 def snapshot_players(con, snapshot_id: str) -> int:
     """~5 MB payload. Schedule so this runs at most once per day."""
     players = _get(con, snapshot_id, "players.nfl", f"{BASE}/players/nfl") or {}

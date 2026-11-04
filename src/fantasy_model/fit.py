@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import polars as pl
 
 # Which positions may fill each Sleeper slot. Bench (BN) and IR slots never score.
@@ -160,6 +161,18 @@ def roster_gain(
             }
         )
     return pl.DataFrame(out).sort("gain", descending=True)
+
+
+def season_gains(gains, cand_pts, span: int) -> np.ndarray:
+    """`span` weeks of lineup gain from the projected weeks. Beyond them, the mean of the weeks
+    the player actually plays: a bye in the projected window shouldn't count against later weeks,
+    since byes end by week 14."""
+    g = np.asarray(gains, dtype=float)
+    if span <= len(g):
+        return g[:span]
+    plays = g[np.asarray(cand_pts, dtype=float)[: len(g)] > 0]
+    tail = plays.mean() if len(plays) else g.mean()
+    return np.concatenate([g, np.full(span - len(g), tail)])
 
 
 def claim_gain(

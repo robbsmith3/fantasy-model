@@ -40,15 +40,6 @@ def test_zero_denial_matches_plain_bid():
     assert best_bid(opp, 0.03, 0.0002, 500) == best_bid(opp, 0.03, 0.0002, 500, np.zeros(5000))
 
 
-def test_future_discount_saves_when_safe_and_spends_when_at_risk():
-    from fantasy_model.recommend import future_discount
-
-    safe = future_discount(np.full(9, 0.01))
-    risky = future_discount(np.array([0.5] + [0.05] * 8))
-    assert 0.35 < safe < 0.5 and risky < safe / 1.5
-    assert future_discount(np.array([0.3])) == 0.0  # last chop: money is worthless after
-
-
 def test_bid_curve_rises_from_zero_and_covers_the_recommended_bid():
     from fantasy_model.recommend import bid_curve
 

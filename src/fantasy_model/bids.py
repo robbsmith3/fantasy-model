@@ -176,12 +176,18 @@ def league_slots(con, platform: str, league_id: str) -> list[str]:
 
 
 def positions(con) -> dict[str, str]:
-    return dict(
-        con.execute(
-            """SELECT DISTINCT ON (player_id) player_id, position
-               FROM player_status_snapshot ORDER BY player_id, snapshot_id DESC"""
-        ).fetchall()
-    )
+    """Latest position per player. Status snapshots only cover today's players, so past seasons'
+    players fall back on nflverse stats."""
+    past = con.execute(
+        """SELECT DISTINCT ON (m.sleeper_id) m.sleeper_id, s.position FROM nfl_player_stats s
+           JOIN player_id_map m ON m.gsis_id = s.player_id WHERE m.sleeper_id IS NOT NULL
+           ORDER BY m.sleeper_id, s.season DESC, s.week DESC"""
+    ).fetchall()
+    now = con.execute(
+        """SELECT DISTINCT ON (player_id) player_id, position
+           FROM player_status_snapshot ORDER BY player_id, snapshot_id DESC"""
+    ).fetchall()
+    return dict(past) | dict(now)
 
 
 def need_table(con, platform: str, league_id: str, season: int, bt: pl.DataFrame) -> dict:
@@ -397,6 +403,147 @@ def max_opponent_bids(
     if return_winner:
         return top, np.where(top > 0, bids.argmax(axis=1), -1)
     return top
+
+
+# ------------------------------------------------------------------ claim chance
+# fit() above only sees players somebody claimed: right for what a claim costs, but it can't say
+# whether anyone claims at all (240 expected claims a run vs 7 real). This player-level model does,
+# from every available RB/WR/TE. Walk-forward on 2026 runs 3-7, trained with 2025: 7.4 expected vs
+# 7.4 real, and 26 of 37 claims in its top 15.
+CLAIM_FEATURES = ["q", "top_need", "needy", "pool_rank", "money"]
+CLAIM_POSITIONS = ("RB", "WR", "TE")
+
+
+def _claim_rows(pool, quality_of, position, rosters: list, slots: list[str], money: float) -> list:
+    """One feature row per pool player. rosters: alive teams' (id, position, quality) lists."""
+    ranked = sorted(pool, key=lambda p: quality_of(p) or 0.0)
+    rank = {p: i / max(len(ranked) - 1, 1) for i, p in enumerate(ranked)}
+    rows = []
+    for p in pool:
+        q = quality_of(p)
+        needs = [need(r, position.get(p), q, slots) for r in rosters]
+        rows.append(
+            {
+                "player_id": p,
+                "q": q or 0.0,
+                "top_need": math.log1p(max(needs, default=0.0)),
+                "needy": math.log1p(sum(n > 0.5 for n in needs)),
+                "pool_rank": rank[p],
+                "money": math.log1p(money),
+            }
+        )
+    return rows
+
+
+def claim_history(con, platform: str, league_id: str, season: int) -> pl.DataFrame:
+    """Past waiver pools, one row per available player per main run, with `claimed`. A pool is
+    the players active in the last 4 weeks, or claimed, who aren't on a surviving roster."""
+    import json
+
+    bt = bid_table(con, platform, league_id, season)
+    run = main_runs(bt)
+    slots = league_slots(con, platform, league_id)
+    alive = alive_by_leg(con, platform, league_id, season)
+    budget = con.execute(
+        "SELECT faab_budget FROM league WHERE platform = ? AND league_id = ?", [platform, league_id]
+    ).fetchall()[0][0]
+    pos = positions(con)
+    pts = weekly_ppr(con, season)
+    prior = dict(
+        weekly_ppr(con, season - 1).group_by("player_id").agg(pl.col("pts").mean()).iter_rows()
+    )
+    out = []
+    for leg in sorted(run["leg"].unique().to_list()):
+        r = run.filter(pl.col("leg") == leg)
+        if r.height < 3:
+            continue
+        agg = pts.filter(pl.col("week") <= leg).group_by("player_id")
+        agg = agg.agg(pl.col("pts").sum(), pl.len().alias("g"))
+        seen = {p: (s, n) for p, s, n in agg.iter_rows()}
+
+        def q(p, seen=seen):
+            return quality(prior.get(p), *seen.get(p, (0.0, 0)))
+
+        rows = con.execute(
+            "SELECT team_id, player_points FROM team_week WHERE platform = ? AND league_id = ? "
+            "AND season = ? AND week = ?",
+            [platform, league_id, season, leg],
+        ).fetchall()
+        teams = {
+            t: list((json.loads(p) if isinstance(p, str) else p or {}).keys())
+            for t, p in rows
+            if t in alive[leg]
+        }
+        rosters = [
+            [(p, pos.get(p, "DEF"), q(p) or 0.0) for p in ids] for ids in teams.values() if ids
+        ]
+        owned = {p for ids in teams.values() for p in ids}
+        recent = set(pts.filter(pl.col("week").is_between(leg - 3, leg))["player_id"].to_list())
+        claimed = set(r.filter(pl.col("bid") > 0)["player_id"].to_list())
+        pool = [p for p in recent | claimed if p not in owned and pos.get(p) in CLAIM_POSITIONS]
+        when = r["processed_at"][0]
+        spent = bt.filter(pl.col("won") & (pl.col("processed_at") < when)).group_by("team_id")
+        spent = dict(spent.agg(pl.col("bid").sum()).iter_rows())
+        money = np.mean([max(budget - spent.get(t, 0), 0) for t in teams]) if teams else 0.0
+        out += [
+            row | {"claimed": float(row["player_id"] in claimed)}
+            for row in _claim_rows(pool, q, pos, rosters, slots, float(money))
+        ]
+    return pl.DataFrame(out)
+
+
+_claim_models: dict = {}
+
+
+def fit_claim_model(con, platform: str, season: int) -> dict | None:
+    """Logistic claim model on every finished or current season of this league we've stored.
+    Cached until a new waiver transaction arrives. None with too little history."""
+    leagues = con.execute(
+        "SELECT league_id, season FROM league WHERE platform = ? AND season <= ? ORDER BY season",
+        [platform, season],
+    ).fetchall()
+    version = con.execute(
+        "SELECT count(*) FROM txn WHERE platform = ? AND type = 'waiver'", [platform]
+    ).fetchall()[0][0]
+    key = (platform, season, version)
+    if key not in _claim_models:
+        frames = [claim_history(con, platform, lid, s) for lid, s in leagues]
+        d = (
+            pl.concat([f for f in frames if not f.is_empty()])
+            if any(not f.is_empty() for f in frames)
+            else None
+        )
+        model = None
+        if d is not None and d["claimed"].sum() >= 20:
+            x = d.select(CLAIM_FEATURES).to_numpy()
+            mean, sd = x.mean(axis=0), x.std(axis=0) + 1e-9
+            design = np.column_stack([np.ones(len(x)), (x - mean) / sd])
+            model = {"w": _logistic(design, d["claimed"].to_numpy()), "mean": mean, "sd": sd}
+        _claim_models[key] = model
+    return _claim_models[key]
+
+
+def claim_chances(
+    model: dict, vals: pl.DataFrame, quality: dict, slots: list[str], teams, faab: dict,
+    recent_players: set[str],
+) -> dict[str, float]:  # fmt: skip
+    """{available RB/WR/TE: chance anyone claims him this run}, on today's rosters."""
+    pos, rosters, pool = {}, {}, []
+    rows = vals.select("player_id", "position", "owner_team_id", "ros_pts").iter_rows()
+    for pid, p, owner, ros in rows:
+        pos[pid] = p
+        if owner in teams:
+            rosters.setdefault(owner, []).append((pid, p, quality.get(pid) or 0.0))
+        elif owner is None and p in CLAIM_POSITIONS and (pid in recent_players or (ros or 0) > 0):
+            pool.append(pid)
+    money = float(np.mean([faab[t] for t in teams]))
+    rows = _claim_rows(pool, quality.get, pos, list(rosters.values()), slots, money)
+    if not rows:
+        return {}
+    x = np.array([[r[c] for c in CLAIM_FEATURES] for r in rows], dtype=float)
+    design = np.column_stack([np.ones(len(x)), (x - model["mean"]) / model["sd"]])
+    p = 1 / (1 + np.exp(-(design @ model["w"])))
+    return {r["player_id"]: float(v) for r, v in zip(rows, p, strict=True)}
 
 
 def crps(samples: np.ndarray, y: float) -> float:

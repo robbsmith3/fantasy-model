@@ -1,7 +1,9 @@
 """Bid sheet: for each pickup, the bid that best trades win probability against FAAB.
 
-EV(bid) = P(win claim | bid) * (dP(win league) - LAMBDA * bid). Sleeper charges the bid only when
-the claim wins. LAMBDA prices a dollar as the league-win probability it buys later in the season."""
+EV(bid) = P(win claim | bid) * (dP(win league) - money cost of bid). Sleeper charges the bid only
+when the claim wins. The money cost is the league-win probability those dollars would buy later in
+the season, simulated at each balance (faab_value), so each extra dollar costs more than the
+last."""
 
 from __future__ import annotations
 
@@ -11,17 +13,15 @@ from dataclasses import dataclass
 import numpy as np
 import polars as pl
 
-from fantasy_model import bids, dynamics, fit, survival, value
+from fantasy_model import bids, dynamics, faab_value, fit, survival, value
 
 # Was 1.15 to offset underpricing; with per-team effects the backtest median bias is -$24 and any
 # scale-up worsens CRPS (1.0: 96.7, 1.15: 102.7), so no bump.
 PRICE_BUMP = 1.0
-CONTESTED_MIN = 25  # market median ($) for a player to count when pricing a dollar
 MAX_DEF = 2  # DEF rows kept on the sheet
 MAX_CLAIMS, PLAN_POOL = 4, 8  # joint plan: up to 4 claims chosen from the top 8 sheet rows
 MARKET_TOP, MARKET_POOL = 15, 100  # market table: top 15 of the 100 best available by projection
 MARKET_SKIP = ("QB", "DEF")
-DEFAULT_LAMBDA = 0.0002  # win prob per $ when nothing is contested (~2% per $100; 2026 previews)
 
 
 @dataclass
@@ -38,18 +38,6 @@ class Context:
     chop_pending: bool  # this week's lowest team not yet eliminated
 
 
-def future_discount(p_chop: np.ndarray) -> float:
-    """What a saved dollar is worth relative to spending it now: the average, over the future
-    waiver runs, of P(we're still alive then) x (share of the remaining chops a pickup made
-    then still plays). A team likely to be chopped soon should spend now; a safe team saves.
-    p_chop: our P(eliminated) per remaining chop, starting with the next one."""
-    n = len(p_chop)
-    if n < 2:
-        return 0.0
-    alive = 1 - np.cumsum(p_chop)
-    return float(np.mean([alive[k - 1] * (n - k) / n for k in range(1, n)]))
-
-
 def bid_curve(max_opp_sorted: np.ndarray, faab: int, bid: int, points: int = 40) -> list:
     """[[bid, P(get)], ...] from $0 to a bit past where the field tops out (for the UI)."""
     hi = float(np.quantile(max_opp_sorted, 0.95)) * 1.25 if len(max_opp_sorted) else 0.0
@@ -62,17 +50,20 @@ def bid_curve(max_opp_sorted: np.ndarray, faab: int, bid: int, points: int = 40)
     return [[float(g), round(float(x), 4)] for g, x in zip(grid, p, strict=True)]
 
 
-def best_bid(max_opp_sorted: np.ndarray, d_p_win: float, lam: float, faab: int, deny_sorted=None):
+def best_bid(
+    max_opp_sorted: np.ndarray, d_p_win: float, lam: float, faab: int, deny_sorted=None, cost=None
+):
     """Bid in [0, faab] maximizing P(get | b) * (d_p_win - lam * b) + denial(b). Ties count half.
     deny_sorted: per-sim loss to our P(win) if that sim's top rival bidder gets the player,
     aligned with max_opp_sorted; denial(b) = expected loss avoided by outbidding him.
+    cost: win probability lost by spending b = 0..faab, replacing lam * b (faab_value.money_cost).
     Returns (bid, P(get), EV)."""
     n = len(max_opp_sorted)
     grid = np.arange(0, faab + 1)
     lt = np.searchsorted(max_opp_sorted, grid, side="left")
     le = np.searchsorted(max_opp_sorted, grid, side="right")
     p = (lt + 0.5 * (le - lt)) / n
-    ev = p * (d_p_win - lam * grid)
+    ev = p * (d_p_win - (lam * grid if cost is None else cost))
     if deny_sorted is not None:
         cum = np.concatenate([[0.0], np.cumsum(deny_sorted)])
         ev = ev + (cum[lt] + 0.5 * (cum[le] - cum[lt])) / n
@@ -198,11 +189,11 @@ def league_state(con, ctx: Context, assume_chop: str | None = None) -> LeagueSta
 
 def market_outlook(
     vals: pl.DataFrame, model: dict, quality: dict, opp: list, slots: list[str], names: dict,
-    top: int = MARKET_TOP, pool: int = MARKET_POOL,
+    chance: dict | None = None, top: int = MARKET_TOP, pool: int = MARKET_POOL,
 ) -> pl.DataFrame:  # fmt: skip
-    """Available players rivals are most likely to claim, by the bid model: the chance any rival
-    bids, and the winning bid when one does (median and 80% range). Rivals only, so our claims
-    don't move it."""
+    """Available players rivals are most likely to claim: the chance anyone does (`chance`, from
+    bids.claim_chances; else the bid model, which overstates it), and the winning bid when one
+    does (median and 80% range), from the bid model. Our claims don't move it."""
     cands = (
         vals.filter(
             pl.col("owner_team_id").is_null()
@@ -231,7 +222,7 @@ def market_outlook(
                 "pos": r["position"],
                 "team": r["nfl_team"],
                 "injury": r["injury_status"],
-                "p_claimed": len(won) / len(mx),
+                "p_claimed": (chance or {}).get(pid, len(won) / len(mx)),
                 "bid": float(np.median(won)),
                 "bid_lo": float(np.quantile(won, 0.1)),
                 "bid_hi": float(np.quantile(won, 0.9)),
@@ -251,18 +242,32 @@ def market_outlook(
     )  # fmt: skip
 
 
-def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int = 300) -> dict:
+def recommend(
+    con, ctx: Context, assume_chop: str | None = None, candidates: int = 300, curve=None
+) -> dict:
     """Returns {'summary', 'sheet', 'plan', 'market'} for the next waiver run."""
     st = league_state(con, ctx, assume_chop)
     vals, gain_weeks, mu, sigma = st.vals, st.gain_weeks, st.mu, st.sigma
     noise, base, me_i, start, dumps = st.noise, st.base, st.me_i, st.start, st.dumps
+
+    pts_cols = [f"pts_w{w}" for w in gain_weeks]
+    played = {x[0]: x[1:] for x in vals.select("player_id", *pts_cols).iter_rows()}
+
+    def _season(g, pid):
+        return fit.season_gains(g, played[pid], mu.shape[1] - start)
 
     # Lineup gain per candidate, then league-win gain.
     gains = fit.roster_gain(vals, ctx.me, ctx.slots, gain_weeks, candidates=candidates)
     gains = gains.filter(pl.col("gain") > 0)
     d_win = [
         survival.pickup_delta(
-            mu, me_i, np.array([r[f"gain_w{w}"] for w in gain_weeks]), sigma, noise, start, dumps
+            mu,
+            me_i,
+            _season([r[f"gain_w{w}"] for w in gain_weeks], r["player_id"]),
+            sigma,
+            noise,
+            start,
+            dumps,
         )["d_p_win"]
         for r in gains.iter_rows(named=True)
     ]
@@ -282,18 +287,10 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         for pid in gains["player_id"]
     }
 
-    # Price of a dollar: win-per-dollar on genuinely contested players (near-free DEFs would make
-    # money look priceless), discounted because later pickups have fewer weeks to help.
-    rates = sorted(
-        (
-            dw / float(np.median(dist[pid]))
-            for pid, dw in gains.select("player_id", "d_p_win").iter_rows()
-            if dw > 0 and np.median(dist[pid]) >= CONTESTED_MIN
-        ),
-        reverse=True,
-    )
-    discount = future_discount(base["p_chop"][me_i, start:])
-    lam = discount * float(np.median(rates[:10])) if rates else DEFAULT_LAMBDA
+    # What a dollar buys later, at each balance. Replaces a flat price per dollar.
+    if curve is None:
+        curve = faab_value.league_curve(st, ctx)
+    cost_all = faab_value.money_cost(curve, my_faab, my_faab)
 
     # Denial: for the most valuable candidates, who would win him if we don't, and what that
     # rival's gain costs our P(win). Ordered by standalone value so the costly sims stay few.
@@ -311,7 +308,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
             if sum(g_t) <= 0:
                 continue
             d = survival.pickup_delta(
-                mu, ctx.alive.index(t), np.array(g_t), sigma, noise, start, dumps
+                mu, ctx.alive.index(t), _season(g_t, pid), sigma, noise, start, dumps
             )
             loss[k] = max(-d["d_p_win_all"][me_i], 0.0)
         per_sim = np.where(who >= 0, loss[np.maximum(who, 0)], 0.0)
@@ -327,7 +324,7 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
     for r in gains.iter_rows(named=True):
         mx = np.sort(dist[r["player_id"]])
         dn = deny.get(r["player_id"])
-        b, p_get, ev = best_bid(mx, r["d_p_win"], lam, my_faab, dn[1] if dn else None)
+        b, p_get, ev = best_bid(mx, r["d_p_win"], 0.0, my_faab, dn[1] if dn else None, cost_all)
         rv = rival.get(r["player_id"])
         rows.append(
             {
@@ -347,6 +344,10 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
                 "rival": rv[0] if rv else None,
                 "rival_p": rv[1] if rv else None,
                 "curve": bid_curve(mx, my_faab, b),
+                "money_cost": float(cost_all[b]),
+                "walk_away": faab_value.walk_away(
+                    curve, my_faab, r["d_p_win"] + (float(dn[1].mean()) if dn else 0.0)
+                ),
             }
         )
     sheet = pl.DataFrame(rows).filter(pl.col("bid") > 0).sort("ev", descending=True)
@@ -365,14 +366,22 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
         noise,
         start,
         dist,
-        lam,
+        0.0,
         my_faab,
         deny,
         st_dumps=dumps,
+        curve=curve,
     )
+    claim_model = bids.fit_claim_model(con, ctx.platform, ctx.season)
+    chance = None
+    if claim_model:
+        recent = bids.weekly_ppr(con, ctx.season).filter(pl.col("week") >= ctx.week - 4)
+        chance = bids.claim_chances(
+            claim_model, vals, qual, ctx.slots, ctx.alive, ctx.faab, set(recent["player_id"])
+        )
     return {
         "plan": plan,
-        "market": market_outlook(vals, model, qual, opp, ctx.slots, ctx.names),
+        "market": market_outlook(vals, model, qual, opp, ctx.slots, ctx.names, chance),
         "summary": {
             "team": ctx.names[ctx.me],
             "faab": my_faab,
@@ -381,8 +390,8 @@ def recommend(con, ctx: Context, assume_chop: str | None = None, candidates: int
             "assume_chop": ctx.names.get(assume_chop) if assume_chop else None,
             "p_win": float(base["p_win"][me_i]),
             "p_chop_next": float(base["p_chop"][me_i, 0]),
-            "lambda_per_100": lam * 100,
-            "faab_discount": discount,
+            "cost_100": float(cost_all[min(100, my_faab)]),
+            "cost_half": float(cost_all[my_faab // 2]),
             "sigma": sigma,
         },
         "sheet": sheet,
@@ -415,7 +424,7 @@ def plan_outcomes(chosen: list[dict]) -> dict[tuple[int, ...], float]:
 
 def claim_plan(
     sheet, vals, ctx, gain_weeks, mu, me_i, sigma, noise, start, dist, lam, faab, deny=None,
-    max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL, st_dumps=None,
+    max_claims: int = MAX_CLAIMS, pool: int = PLAN_POOL, st_dumps=None, curve=None,
 ) -> pl.DataFrame:  # fmt: skip
     """Greedy joint plan. Each step re-values every remaining candidate given the claims already
     chosen: averaged over which of them land (their P(get)), using the roster those wins produce.
@@ -425,6 +434,14 @@ def claim_plan(
     only one claim per group can be charged, the plan's total is the top bid of each group, which
     stays within FAAB."""
     cands = sheet.head(pool).select("player_id", "player", "pos").rows()
+    pts_cols = [f"pts_w{w}" for w in gain_weeks]
+    played = {x[0]: x[1:] for x in vals.select("player_id", *pts_cols).iter_rows()}
+    span = mu.shape[1] - start
+    away = (
+        dict(sheet.select("player_id", "walk_away").iter_rows())
+        if "walk_away" in sheet.columns
+        else {}
+    )
     chosen: list[dict] = []
     for _ in range(max_claims):
         tops: dict[str, int] = {}
@@ -446,6 +463,7 @@ def claim_plan(
                 if limit <= 0:
                     continue
                 d_win = reached = 0.0
+                cost = None if curve is None else np.zeros(limit + 1)
                 for landed, prob in outcomes.items():
                     won = [chosen[i] for i in landed]
                     drops = [c["drop_id"] for c in won]
@@ -458,21 +476,29 @@ def claim_plan(
                     # Base team strength in this outcome includes the earlier wins' gains.
                     bumped = mu.copy()
                     for c in won:
-                        g = np.array(c["gains"])
-                        span = mu.shape[1] - start
-                        g = np.concatenate([g, np.full(max(span - len(g), 0), g.mean())])[:span]
-                        bumped[me_i, start:] += g
+                        bumped[me_i, start:] += c["gains"]
                     d = survival.pickup_delta(
-                        bumped, me_i, np.array(gains), sigma, noise, start, st_dumps
+                        bumped,
+                        me_i,
+                        fit.season_gains(gains, played[pid], span),
+                        sigma,
+                        noise,
+                        start,
+                        st_dumps,
                     )
                     d_win += prob * d["d_p_win"]
                     reached += prob
+                    if curve is not None:
+                        left = faab - sum(c["bid"] for c in won)
+                        cost += prob * faab_value.money_cost(curve, left, limit)
                 if reached <= 0:
                     continue
                 d_win /= reached  # value if this claim lands; the bid only matters when reached
+                if curve is not None:
+                    cost /= reached
                 dn = (deny or {}).get(pid)
                 b, p_get, ev = best_bid(
-                    np.sort(dist[pid]), d_win, lam, limit, dn[1] if dn else None
+                    np.sort(dist[pid]), d_win, lam, limit, dn[1] if dn else None, cost
                 )
                 ev *= reached
                 if b > 0 and ev > 0 and (best is None or ev > best["ev"]):
@@ -481,7 +507,7 @@ def claim_plan(
                     )
                     best = {"player_id": pid, "player": name, "pos": pos, "bid": b,
                             "p_get": p_get, "ev": ev, "d_p_win": d_win, "drop_id": drop0,
-                            "gains": g0}  # fmt: skip
+                            "gains": fit.season_gains(g0, played[pid], span)}  # fmt: skip
         if best is None:
             break
         chosen.append(best)
@@ -498,6 +524,7 @@ def claim_plan(
                 "drop": names.get(c["drop_id"]),
                 "player_id": c["player_id"],
                 # The earlier claim(s) this one only runs behind, or None if it stands alone.
+                "walk_away": away.get(c["player_id"]),
                 "backup_for": ", ".join(e["player"] for e in chosen[:i] if _group(e) == _group(c))
                 or None,
             }  # fmt: skip
@@ -512,6 +539,7 @@ def claim_plan(
             "d_p_win": pl.Float64,
             "drop": pl.Utf8,
             "player_id": pl.Utf8,
+            "walk_away": pl.Int64,
             "backup_for": pl.Utf8,
         },  # fmt: skip
     )

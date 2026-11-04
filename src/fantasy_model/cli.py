@@ -21,6 +21,7 @@ Setup / utilities:
   validate-sim WEEK [WEEK ...]  score past chop predictions: player-level vs team-level
   injury-curves                 chance of playing after Questionable/Doubtful/Out (nflverse)
   recommend [--assume-chop TEAM_ID] [--csv PATH]
+  import-league LEAGUE_ID   load a finished league's bids and scores (for bid-model history)
                                 bid sheet for the next Sleeper waiver run
   lineup [--week N] [--team ID] survival lineup: max P(not lowest) vs max points
   live                          live chop odds from in-game scores (Sundays)
@@ -283,8 +284,7 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
     print(
         f"P(win league) {s['p_win']:.1%}   "
         f"P(chopped {'this' if s['chop_pending'] else 'next'} week) {s['p_chop_next']:.1%}   "
-        f"$100 of FAAB ~ {s['lambda_per_100']:.2%} win prob "
-        f"(saved $ worth {s['faab_discount']:.0%} of spent $)"
+        f"spending $100 costs {s['cost_100']:.2%} win prob, half your FAAB {s['cost_half']:.2%}"
     )
     if sheet.is_empty():
         print("No bid worth placing: no available player improves your lineup enough.")
@@ -298,7 +298,7 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
         print(
             f"{i:2} {(r['player'] + inj)[:24]:24} {r['pos']:4} {r['pts_gain']:5.1f} "
             f"{r['d_p_win']:6.2%} {r['deny']:6.2%} {r['bid']:5d} {r['p_win_claim']:6.0%} "
-            f"{r['market_median']:7.0f}  {r['drop']}"
+            f"{r['market_median']:7.0f}  walk ${r['walk_away']:<4} {r['drop']}"
         )
     plan = out["plan"]
     if not plan.is_empty():
@@ -309,7 +309,9 @@ def print_recommendation(con, assume_chop: str | None, csv: str | None) -> None:
         for r in plan.iter_rows(named=True):
             print(
                 f"  {r['order']}. {r['player'][:24]:24} {r['pos']:4} bid ${r['bid']:<4} "
-                f"P(get) {r['p_get']:4.0%}  +win {r['d_p_win']:6.2%}  drop {r['drop']}"
+                f"P(get) {r['p_get']:4.0%}  +win {r['d_p_win']:6.2%}  "
+                f"walk away ${r['walk_away']:<4} "
+                f"drop {r['drop']}"
                 + (f"  (only if {r['backup_for']} misses)" if r["backup_for"] else "")
             )
         most = plan.filter(pl.col("backup_for").is_null())["bid"].sum()
@@ -347,6 +349,8 @@ def main(argv: list[str] | None = None) -> None:
     lu = sub.add_parser("lineup")
     lu.add_argument("--week", type=int)
     lu.add_argument("--team")
+    imp = sub.add_parser("import-league")
+    imp.add_argument("league_id")
     srv = sub.add_parser("serve")
     srv.add_argument("--host", default="127.0.0.1")
     srv.add_argument("--port", type=int, default=8000)
@@ -372,6 +376,13 @@ def main(argv: list[str] | None = None) -> None:
         return yahoo.authorize(a.redirect)
 
     con = db.connect()
+    if a.cmd == "import-league":
+        print(
+            sleeper.import_past_league(
+                con, a.league_id, config.load_config()["me"].get("sleeper_user_id")
+            )
+        )
+        return 0
     sid = f"{db.now_utc():%Y-%m-%dT%H:%MZ}_{a.cmd}"
     if a.cmd == "yahoo-leagues":
         for lg in yahoo.my_leagues(con, sid):
