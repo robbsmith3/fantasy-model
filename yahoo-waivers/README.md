@@ -65,13 +65,15 @@ else, so a saved file never outlives the next run.
 
 ### Keeping Claude Code out of Yahoo data
 Claude Code built this tool with synthetic data only and must not read real output. Add these
-to `~/.claude/settings.json` (merge into the existing lists). They're settings Claude can't change:
+to `~/.claude/settings.json` (merge into the existing lists). They're settings Claude can't change.
+In `permissions` rules an absolute path needs a leading `//`; a single `/` is relative to the
+settings file's folder:
 ```json
 {
   "permissions": {
     "deny": [
-      "Read(/home/robbs/code/fantasy-model/yahoo-waivers/recs/**)",
-      "Read(/home/robbs/code/fantasy-model/yahoo-waivers/.env)"
+      "Read(//home/robbs/code/fantasy-model/yahoo-waivers/recs/**)",
+      "Read(//home/robbs/code/fantasy-model/yahoo-waivers/.env)"
     ]
   },
   "sandbox": {
