@@ -9,9 +9,6 @@ Snapshot jobs (idempotent, safe to re-run):
                    for every week so far; one-off, safe to re-run
 
 Setup / utilities:
-  yahoo-auth [--redirect URI]   one-time OAuth (run under `op run`)
-  yahoo-leagues                 list your Yahoo league keys
-  yahoo-probe <league_key>      dump one page of transactions; confirms faab_bid exists
   idmap                         refresh cross-platform player ID map (nflverse)
   history [<season> ...]        load nflverse weekly stats/snaps/schedules (default: current)
   health                        recent runs, failures, unmapped players
@@ -33,7 +30,6 @@ Setup / utilities:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import traceback
 
@@ -49,7 +45,6 @@ from fantasy_model import (
     odds,
     projection_model,
     sleeper,
-    yahoo,
 )
 
 JOBS = ("daily", "pre_waiver", "post_waiver", "pre_kickoff", "backfill")
@@ -134,13 +129,6 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
                     season,
                     w,
                 )
-        for lg in config.leagues(cfg, "yahoo"):
-            lk = lg["league_id"]
-            step(f"yh:{lg.get('nickname', lk)}:league", yahoo.sync_league, con, snapshot_id, lk)
-            for w in recent:
-                step(
-                    f"yh:{lk}:scores_w{w}", yahoo.sync_week_scores, con, snapshot_id, lk, season, w
-                )
         ahead = list(range(week, min(week + weeks_ahead, 18) + 1))
         for w in ahead:
             step(f"proj_w{w}", sleeper.snapshot_projections, con, snapshot_id, season, w)
@@ -164,10 +152,6 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
             step(f"sl:{lid}:league", sleeper.sync_league, con, snapshot_id, lid, me)
             # Weekly report card on the run that just processed; refits data/calibration.json.
             step(f"sl:{lid}:review", run_review, con, lid, season)
-        for lg in config.leagues(cfg, "yahoo"):
-            lk = lg["league_id"]
-            step(f"yh:{lk}:txns", yahoo.sync_transactions, con, snapshot_id, lk, season)
-            step(f"yh:{lk}:league", yahoo.sync_league, con, snapshot_id, lk)
 
     elif job == "backfill":
         # Sleeper serves past weeks' scores and transactions, so these can be recovered.
@@ -234,14 +218,6 @@ def health(con) -> None:
         q("SELECT count(*) FROM snapshot_run WHERE NOT coalesce(ok, FALSE)")[0][0],
     )
     print("ID map rows:", q("SELECT count(*) FROM player_id_map")[0][0])
-    print(
-        "Unmapped Yahoo rostered players (latest snapshot):",
-        q("""
-        SELECT count(*) FROM roster_snapshot_canon
-        WHERE platform='yahoo' AND sleeper_id IS NULL
-          AND snapshot_id = (SELECT max(snapshot_id) FROM roster_snapshot WHERE platform='yahoo')
-    """)[0][0],
-    )
     print("Bids captured:", q("SELECT platform, count(*), count(bid) FROM txn GROUP BY 1"))
     print(
         "Teams alive (latest):",
@@ -335,9 +311,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run").add_argument("job", choices=JOBS)
-    sub.add_parser("yahoo-auth").add_argument("--redirect", default="oob")
-    sub.add_parser("yahoo-leagues")
-    sub.add_parser("yahoo-probe").add_argument("league_key")
     sub.add_parser("idmap")
     sub.add_parser("history").add_argument("seasons", nargs="*", type=int)
     sub.add_parser("health")
@@ -381,8 +354,6 @@ def main(argv: list[str] | None = None) -> None:
         from fantasy_model import api
 
         return api.serve(a.host, a.port)
-    if a.cmd == "yahoo-auth":
-        return yahoo.authorize(a.redirect)
 
     con = db.connect()
     if a.cmd == "import-league":
@@ -393,16 +364,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         return 0
     sid = f"{db.now_utc():%Y-%m-%dT%H:%MZ}_{a.cmd}"
-    if a.cmd == "yahoo-leagues":
-        for lg in yahoo.my_leagues(con, sid):
-            print(lg)
-    elif a.cmd == "yahoo-probe":
-        fc = yahoo._get(
-            con, sid, "probe.transactions", f"league/{a.league_key}/transactions;types=add;count=5"
-        )
-        print(json.dumps(fc, indent=1)[:6000])
-        print("\n>>> faab_bid present:", '"faab_bid"' in json.dumps(fc))
-    elif a.cmd == "idmap":
+    if a.cmd == "idmap":
         print("player_id_map rows:", nflverse.load_id_map(con))
     elif a.cmd == "history":
         import nflreadpy

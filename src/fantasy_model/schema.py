@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS snapshot_run (
 CREATE TABLE IF NOT EXISTS raw_response (
     snapshot_id   VARCHAR NOT NULL,
     fetched_at    TIMESTAMPTZ NOT NULL,
-    platform      VARCHAR NOT NULL,         -- sleeper | yahoo
+    platform      VARCHAR NOT NULL,         -- sleeper
     endpoint      VARCHAR NOT NULL,         -- logical name, e.g. league.rosters
     url           VARCHAR NOT NULL,
     http_status   INTEGER,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS raw_response (
 
 CREATE TABLE IF NOT EXISTS league (
     platform        VARCHAR NOT NULL,
-    league_id       VARCHAR NOT NULL,       -- Sleeper league_id / Yahoo league_key
+    league_id       VARCHAR NOT NULL,       -- Sleeper league_id
     season          INTEGER NOT NULL,
     name            VARCHAR,
     total_rosters   INTEGER,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS league (
 CREATE TABLE IF NOT EXISTS team (
     platform      VARCHAR NOT NULL,
     league_id     VARCHAR NOT NULL,
-    team_id       VARCHAR NOT NULL,         -- Sleeper roster_id / Yahoo team_key
+    team_id       VARCHAR NOT NULL,         -- Sleeper roster_id
     owner_id      VARCHAR,
     owner_name    VARCHAR,
     team_name     VARCHAR,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS txn (
     league_id       VARCHAR NOT NULL,
     transaction_id  VARCHAR NOT NULL,
     season          INTEGER NOT NULL,
-    week            INTEGER,                -- Sleeper leg; NULL for Yahoo (use processed_at)
+    week            INTEGER,                -- Sleeper leg
     type            VARCHAR,
     status          VARCHAR,
     team_id         VARCHAR,
@@ -155,10 +155,8 @@ CREATE TABLE IF NOT EXISTS player_id_map (
 
 -- Every roster row expressed in Sleeper id space (the canonical id for status/projections).
 CREATE OR REPLACE VIEW roster_snapshot_canon AS
-SELECT rs.*,
-       CASE WHEN rs.platform = 'sleeper' THEN rs.player_id ELSE m.sleeper_id END AS sleeper_id
-FROM roster_snapshot rs
-LEFT JOIN player_id_map m ON rs.platform = 'yahoo' AND m.yahoo_id = rs.player_id;
+SELECT rs.*, rs.player_id AS sleeper_id
+FROM roster_snapshot rs;
 
 -- Waiver pool per (roster snapshot, league) = rostered-nowhere players, using the
 -- latest player-status snapshot taken at or before that roster snapshot.

@@ -1,0 +1,17 @@
+# Copy to config.toml (gitignored). Only these leagues and teams can be requested.
+
+[[league]]
+name = "guillotine"
+league_id = "123456"   # the number in https://football.fantasysports.yahoo.com/f1/123456
+team_id = "3"          # yours: the number after the league id in your team's URL
+
+# [[league]]
+# name = "endgame"
+# league_id = "654321"
+# team_id = "7"
+
+[settings]
+players_per_position = 25   # top N available per position fetched from Yahoo
+requests_per_second = 1.0   # throttle for Yahoo calls
+max_retries = 5             # on 429, 999 and 5xx, with exponential backoff and jitter
+faab_budget = 100           # Yahoo's default; only used if the league settings don't say

@@ -1,0 +1,14 @@
+# Secrets and personal settings
+.env
+*.token
+config.toml
+
+# Output that holds Yahoo-derived data (deleted by every run, see SPEC.md)
+recs/
+
+# Python
+.venv/
+__pycache__/
+*.py[oc]
+.pytest_cache/
+.ruff_cache/

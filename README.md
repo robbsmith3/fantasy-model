@@ -14,7 +14,7 @@ season, models how much each rival will bid, and turns it into a claim plan, a l
 elimination odds, served as a local web app.
 
 ```
-   Sleeper · ESPN · FantasyPros · nflverse · Yahoo*
+   Sleeper · ESPN · FantasyPros · nflverse
                         │  scheduled snapshots
                         ▼
               DuckDB (raw responses + snapshots)
@@ -23,7 +23,8 @@ elimination odds, served as a local web app.
                                                               │
      claim plan · survival lineup · live chop odds · weekly report card  (web app + CLI)
 ```
-<sub>*Yahoo support is built but waits on Yahoo's API approval.</sub>
+Yahoo leagues are handled by the separate tool in [yahoo-waivers/](yahoo-waivers/), which never
+stores Yahoo data (Yahoo's API terms), so it shares no code or database with this project.
 
 ## Features
 
@@ -153,7 +154,7 @@ is predicting *which* rival wins a given player.
 
 ```
 src/fantasy_model/
-  sleeper.py espn.py fantasypros.py yahoo.py nflverse.py   data adapters
+  sleeper.py espn.py fantasypros.py nflverse.py            data adapters
   schema.py db.py                                          DuckDB schema, raw landing, upserts
   value.py projection_model.py                             consensus projections + own model
   fit.py lineup.py                                         lineups, pickup value, survival lineup
@@ -183,8 +184,6 @@ backtest only uses data from before the week it predicts.
   saved before kickoff by `daily` and `pre_kickoff`, each game once; a game missed by kickoff
   raises an alert. Free plan. Being collected for testing, not yet in the consensus. Needs a
   key in `~/.config/fantasy-model/odds-api.key` (or `$ODDS_API_KEY`).
-- **Yahoo Fantasy:** awaiting API access. Screens showing Yahoo data will carry "Fantasy data
-  provided by Yahoo Fantasy" as Yahoo requires.
 
 This is a personal, non-commercial project. Unofficial endpoints can change without notice;
 respect each provider's terms.
@@ -200,8 +199,7 @@ uv run pre-commit run --all-files # ruff lint + format + gitleaks secret scan
 cd web && npm run dev             # frontend with hot reload (proxies /api to `ffm serve`)
 ```
 
-Secrets stay out of the repo: Yahoo credentials are 1Password references in
-`config/yahoo.env`, and the OAuth token lives in `~/.config/fantasy-model/` (chmod 600).
+Secrets stay out of the repo: the Odds API key lives in `~/.config/fantasy-model/` (chmod 600).
 Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLOG.md).
 
 ## Security
@@ -209,8 +207,7 @@ Decisions, experiments and dead ends are recorded in [docs/DEVLOG.md](docs/DEVLO
 - `ffm serve` listens on `127.0.0.1` only and has no login. Keep it that way: don't bind it to
   `0.0.0.0` or forward its port, or anyone on the network could read your league data.
 - No credentials live in this repo. League ids are in the git-ignored `config/leagues.toml`;
-  Yahoo's client id and secret are 1Password references (`config/yahoo.env`); the OAuth token and
-  the Odds API key are stored outside the repo with owner-only permissions.
+  the Odds API key is stored outside the repo with owner-only permissions.
 - Collected data (`data/`) and logs (`logs/`) are git-ignored.
 - The server only answers requests addressed to `127.0.0.1`/`localhost` (a guard against
   DNS rebinding, where a hostile web page points its own domain at your machine).

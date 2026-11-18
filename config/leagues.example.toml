@@ -8,16 +8,6 @@ platform  = "sleeper"
 league_id = ""              # sleeper.com/leagues/<league_id>
 nickname  = "sleeper-guillotine"
 
-[[league]]
-platform  = "yahoo"
-league_id = ""              # league_key, e.g. "461.l.123456" -> get via `uv run ffm yahoo-leagues`
-nickname  = "yahoo-1"
-
-[[league]]
-platform  = "yahoo"
-league_id = ""
-nickname  = "yahoo-2"
-
 [backup]
 # Weekly backups of data/ + this file (after post_waiver, or `ffm backup`). Use a synced folder
 # (OneDrive, Dropbox...) so copies leave this machine. Default: ~/fantasy-model-backups

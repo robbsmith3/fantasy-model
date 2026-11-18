@@ -312,6 +312,16 @@ Four-source average MAE, 2026 week 8 only, difference from baseline (189 players
   the same ~96 credits a week. Captured earlier, lines can be up to a day staler. A listed game that
   started without being captured raises MissedGames: the run reports an error and an alert.
 
+## 2026-11-17
+
+### Yahoo moved out
+- Yahoo's API agreement forbids storing Yahoo data (§2.c.vii), and this project lands every
+  response in DuckDB. Removed the Yahoo adapter, its commands, job steps and config, and deleted
+  the only Yahoo rows in the database: 3 `raw_response` entries from 2026-10-31 login attempts
+  (HTTP 403, no body, so no Yahoo data; the backups that include them hold none either).
+- Yahoo leagues now go through `yahoo-waivers/`, a separate tool that keeps Yahoo data in memory
+  only (see its SPEC.md). `player_id_map.yahoo_id` stays: it's nflverse's public id map.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

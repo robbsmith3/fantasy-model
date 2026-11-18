@@ -1,12 +1,9 @@
-"""End-to-end jobs against mocked Sleeper + Yahoo responses (no network)."""
-
-import json
-import time
+"""End-to-end jobs against mocked Sleeper responses (no network)."""
 
 import pytest
 from conftest import FakeResp
 
-from fantasy_model import cli, espn, fantasypros, odds, projection_model, sleeper, yahoo
+from fantasy_model import cli, espn, fantasypros, odds, projection_model, sleeper
 
 # ---------------------------------------------------------------- Sleeper fixtures
 SLEEPER = {
@@ -100,169 +97,6 @@ def sleeper_get(url, params=None, timeout=None):
     raise AssertionError(url)
 
 
-# ------------------------------------------------ Yahoo fixtures (Yahoo's JSON shape)
-LK = "461.l.1"
-Y_PLAYER = lambda pid, extra: [
-    [
-        {"player_key": f"461.p.{pid}"},
-        {"player_id": pid},
-        {"name": {"full": f"P{pid}"}},
-        [],
-    ],
-    extra,
-]
-Y_TEAM_META = lambda n, faab, me: [
-    {"team_key": f"{LK}.t.{n}"},
-    {"team_id": str(n)},
-    {"name": f"Team{n}"},
-    [],
-    {"is_owned_by_current_login": 1 if me else 0},
-    {"faab_balance": str(faab)},
-    {"managers": [{"manager": {"guid": f"g{n}", "nickname": f"m{n}"}}]},
-]
-Y_LEAGUE_META = {
-    "league_key": LK,
-    "name": "YGuillo",
-    "num_teams": 18,
-    "season": "2026",
-    "renew": "",
-}
-
-YAHOO = {
-    "settings": {
-        "league": [
-            Y_LEAGUE_META,
-            {
-                "settings": [
-                    {"uses_faab": "1", "roster_positions": [], "stat_modifiers": {"stats": []}}
-                ]
-            },
-        ]
-    },
-    "teams/roster": {
-        "league": [
-            Y_LEAGUE_META,
-            {
-                "teams": {
-                    "0": {
-                        "team": [
-                            Y_TEAM_META(1, 73, True),
-                            {
-                                "roster": {
-                                    "coverage_type": "week",
-                                    "0": {
-                                        "players": {
-                                            "0": {
-                                                "player": Y_PLAYER(
-                                                    "30001",
-                                                    {
-                                                        "selected_position": [
-                                                            {"coverage_type": "week"},
-                                                            {"position": "TE"},
-                                                        ]
-                                                    },
-                                                )
-                                            },
-                                            "1": {
-                                                "player": Y_PLAYER(
-                                                    "30002",
-                                                    {
-                                                        "selected_position": [
-                                                            {"coverage_type": "week"},
-                                                            {"position": "BN"},
-                                                        ]
-                                                    },
-                                                )
-                                            },
-                                            "count": 2,
-                                        }
-                                    },
-                                }
-                            },
-                        ]
-                    },
-                    "1": {"team": [Y_TEAM_META(2, 100, False), {"roster": {"0": {"players": []}}}]},
-                    "count": 2,
-                }
-            },
-        ]
-    },
-    "teams/stats": {
-        "league": [
-            Y_LEAGUE_META,
-            {
-                "teams": {
-                    "0": {"team": [Y_TEAM_META(1, 73, True), {"team_points": {"total": "131.24"}}]},
-                    "count": 1,
-                }
-            },
-        ]
-    },
-    "transactions": {
-        "league": [
-            Y_LEAGUE_META,
-            {
-                "transactions": {
-                    "0": {
-                        "transaction": [
-                            {
-                                "transaction_key": f"{LK}.tr.55",
-                                "transaction_id": "55",
-                                "type": "add/drop",
-                                "status": "successful",
-                                "timestamp": "1761900000",
-                                "faab_bid": "41",
-                            },
-                            {
-                                "players": {
-                                    "0": {
-                                        "player": Y_PLAYER(
-                                            "30001",
-                                            {
-                                                "transaction_data": [
-                                                    {
-                                                        "type": "add",
-                                                        "source_type": "waivers",
-                                                        "destination_type": "team",
-                                                        "destination_team_key": f"{LK}.t.1",
-                                                    }
-                                                ]
-                                            },
-                                        )
-                                    },
-                                    "1": {
-                                        "player": Y_PLAYER(
-                                            "30009",
-                                            {
-                                                "transaction_data": {
-                                                    "type": "drop",
-                                                    "source_type": "team",
-                                                    "source_team_key": f"{LK}.t.1",
-                                                    "destination_type": "waivers",
-                                                }
-                                            },
-                                        )
-                                    },
-                                    "count": 2,
-                                }
-                            },
-                        ]
-                    },
-                    "count": 1,
-                }
-            },
-        ]
-    },
-}
-
-
-def yahoo_get(url, params=None, timeout=None, headers=None):
-    for frag in ("teams/roster", "teams/stats", "transactions", "settings"):
-        if frag in url:
-            return FakeResp({"fantasy_content": YAHOO[frag]}, url)
-    raise AssertionError(url)
-
-
 ESPN = {
     "players": [
         {
@@ -300,25 +134,13 @@ def mocked(con, monkeypatch):
     monkeypatch.setattr(projection_model, "snapshot_projections", lambda *a: 0)
     # The weekly review needs nflverse tables too; tested in test_review / test_bids.
     monkeypatch.setattr(cli, "run_review", lambda *a: "skipped")
-    monkeypatch.setattr(yahoo.session, "get", yahoo_get)
-    yahoo._save_token(
-        {
-            "client_id": "c",
-            "client_secret": "s",
-            "refresh_token": "r",
-            "access_token": "a",
-            "expires_at": time.time() + 3600,
-        }
-    )
-    # id map: yahoo 30001 -> sleeper 888 (30002 deliberately unmapped)
-    con.execute("INSERT INTO player_id_map (sleeper_id, yahoo_id, name) VALUES ('888','30001','x')")
     return con
 
 
 CFG = {
     "me": {"sleeper_user_id": "u1"},
     "projections": {"weeks_ahead": 1},
-    "league": [{"platform": "sleeper", "league_id": "L1"}, {"platform": "yahoo", "league_id": LK}],
+    "league": [{"platform": "sleeper", "league_id": "L1"}],
 }
 
 
@@ -332,47 +154,16 @@ def test_all_jobs_and_idempotency(mocked):
         assert cli.run_job(job, CFG, con), job
     n_txn = count(con, "txn")
     assert cli.run_job("post_waiver", CFG, con)  # re-run must not duplicate
-    assert count(con, "txn") == n_txn == 2
+    assert count(con, "txn") == n_txn == 1
     assert count(con, "snapshot_run") >= 4
 
 
-def test_bids_parsed_both_platforms(mocked):
+def test_bids_parsed(mocked):
     cli.run_job("post_waiver", CFG, mocked)
-    bids = dict(mocked.execute("SELECT platform, bid FROM txn").fetchall())
-    assert bids == {"sleeper": 27, "yahoo": 41}
-    yp = mocked.execute(
-        "SELECT action, team_id, source_type FROM txn_player WHERE platform='yahoo' ORDER BY action"
-    ).fetchall()
-    assert yp == [("add", f"{LK}.t.1", "waivers"), ("drop", f"{LK}.t.1", "team")]
-    assert (
-        mocked.execute("SELECT team_id FROM txn WHERE platform='yahoo'").fetchone()[0]
-        == f"{LK}.t.1"
-    )
+    assert dict(mocked.execute("SELECT platform, bid FROM txn").fetchall()) == {"sleeper": 27}
 
 
-def test_yahoo_rosters_state_and_scores(mocked):
-    cli.run_job("pre_waiver", CFG, mocked)
-    st = mocked.execute(
-        "SELECT team_id, faab_remaining, n_players, eliminated "
-        "FROM team_state_snapshot WHERE platform='yahoo' ORDER BY 1"
-    ).fetchall()
-    assert st == [(f"{LK}.t.1", 73, 2, False), (f"{LK}.t.2", 100, 0, True)]
-    starters = dict(
-        mocked.execute(
-            "SELECT player_id, is_starter FROM roster_snapshot WHERE platform='yahoo'"
-        ).fetchall()
-    )
-    assert starters == {"30001": True, "30002": False}
-    assert mocked.execute("SELECT points FROM team_week WHERE platform='yahoo'").fetchone()[
-        0
-    ] == pytest.approx(131.24)
-    assert (
-        mocked.execute("SELECT is_me FROM team WHERE team_id=?", [f"{LK}.t.1"]).fetchone()[0]
-        is True
-    )
-
-
-def test_waiver_pool_uses_id_map(mocked):
+def test_waiver_pool(mocked):
     cli.run_job("daily", CFG, mocked)
     cli.run_job("pre_waiver", CFG, mocked)
     pool = lambda p: {
@@ -382,29 +173,25 @@ def test_waiver_pool_uses_id_map(mocked):
         ).fetchall()
     }
     assert pool("sleeper") == {"777", "888"}  # 4046/6794 rostered, OL excluded
-    assert pool("yahoo") == {"4046", "6794", "777"}  # 888 rostered via yahoo 30001
 
 
 def test_one_league_failing_is_isolated(mocked, monkeypatch):
     def boom(*a, **k):
-        raise RuntimeError("yahoo down")
+        raise RuntimeError("sleeper down")
 
-    monkeypatch.setattr(yahoo, "sync_league", boom)
+    monkeypatch.setattr(sleeper, "sync_league", boom)
     ok = cli.run_job("pre_waiver", CFG, mocked)
     assert ok is False
     assert count(mocked, "projection_snapshot") > 0  # other steps still ran
     err = mocked.execute("SELECT error FROM snapshot_run WHERE NOT ok").fetchone()[0]
-    assert "yahoo down" in err
+    assert "sleeper down" in err
 
 
 def test_raw_landed_before_parse(mocked):
     cli.run_job("post_waiver", CFG, mocked)
     eps = {r[0] for r in mocked.execute("SELECT DISTINCT endpoint FROM raw_response").fetchall()}
-    assert {"league.transactions", "league.settings", "league.teams.roster"} <= eps
+    assert {"league.transactions", "league", "league.rosters"} <= eps
     body = mocked.execute(
-        "SELECT body FROM raw_response WHERE platform='yahoo' AND endpoint='league.transactions'"
+        "SELECT body FROM raw_response WHERE endpoint='league.transactions' LIMIT 1"
     ).fetchone()[0]
-    assert (
-        "faab_bid"
-        in json.loads(body)["fantasy_content"]["league"][1]["transactions"]["0"]["transaction"][0]
-    )
+    assert "waiver_bid" in body
