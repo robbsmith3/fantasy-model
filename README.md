@@ -191,7 +191,7 @@ respect each provider's terms.
 ## Development
 
 CI (GitHub Actions) runs on every push and pull request: lint, format, secret scan and tests for
-Python; type check, build and `npm audit` for the web app.
+Python; type check, build and `npm audit` for the web app; lint and tests for `yahoo-waivers/`.
 
 ```bash
 uv run pytest                     # Python tests (all network calls mocked)

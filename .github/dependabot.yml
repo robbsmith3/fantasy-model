@@ -10,6 +10,13 @@ updates:
     groups:
       python:
         patterns: ["*"]
+  - package-ecosystem: uv
+    directory: /yahoo-waivers
+    schedule:
+      interval: monthly
+    groups:
+      yahoo-waivers:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /web
     schedule:

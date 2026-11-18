@@ -22,6 +22,22 @@ jobs:
       - name: Tests
         run: uv run pytest -q
 
+  yahoo-waivers:
+    name: Yahoo waivers (lint, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: yahoo-waivers
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Install (exact versions from uv.lock)
+        run: uv sync --locked
+      - name: Lint and format
+        run: uv run ruff check src tests && uv run ruff format --check src tests
+      - name: Tests (synthetic data only, no network)
+        run: uv run pytest -q
+
   web:
     name: Web (types, build, audit)
     runs-on: ubuntu-latest
