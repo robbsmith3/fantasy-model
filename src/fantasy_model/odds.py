@@ -4,9 +4,12 @@ Props are set by markets with money on the line, so they may disagree with the p
 usefully (Sleeper, ESPN and FantasyPros errors correlate 0.97). Not in the consensus yet: they
 join only if a backtest on collected weeks shows a gain (`ffm eval-props`, once a few weeks exist).
 
-Snapshotted in `pre_kickoff` for games starting in the next WINDOW hours: there's no free
-history, so each week has to be captured before kickoff. Cost = markets x games (listing events
-is free), ~96 credits a week against the free plan's 500 a month; the quota guard drops
+There's no free history, so each game has to be captured before kickoff. `daily` and `pre_kickoff`
+both snapshot games starting in the next WINDOW hours, each game once: Wednesday's daily catches
+Thursday's game and Saturday's catches Sunday's, so a run that starts late (PC off) doesn't lose
+them, and pre_kickoff picks up the rest. A game that kicked off without being captured is reported
+as an error (so an alert), since it can't be recovered. Cost = markets x games (listing events is
+free), ~96 credits a week against the free plan's 500 a month; the quota guard drops
 low-priority markets rather than run out.
 
 The key is read from $ODDS_API_KEY or ~/.config/fantasy-model/odds-api.key (chmod 600), never from
@@ -178,16 +181,39 @@ def players_by_name(con) -> dict[tuple[str, str], tuple[str, str]]:
     return {(norm(n), t): (pid, pos) for pid, n, pos, t in rows if n and t}
 
 
+class MissedGames(RuntimeError):
+    """Games kicked off before their props were captured."""
+
+
+def _captured(con) -> set[str]:
+    """Event ids whose odds are already stored."""
+    urls = con.execute(
+        "SELECT url FROM raw_response WHERE platform = ? AND endpoint = 'event_odds'", [PLATFORM]
+    ).fetchall()
+    return {m.group(1) for (u,) in urls if (m := re.search(r"/events/([^/]+)/odds", u))}
+
+
 def snapshot_props(con, snapshot_id: str, season: int, week: int, now=None) -> int:
+    """Capture each game starting within WINDOW that isn't stored yet. Raises MissedGames, after
+    storing the rest, if a listed game already started without being captured."""
     now = now or datetime.now(UTC)
     events = _get("/events").json()
     land_raw(con, snapshot_id, PLATFORM, "events", f"{BASE}/events", 200, events)
-    upcoming = [
-        e for e in events
-        if now < datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00")) <= now + WINDOW
-    ]  # fmt: skip
-    if not upcoming:
-        return 0
+    done = _captured(con)
+
+    def kickoff(e):
+        return datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+
+    missed = [e for e in events if kickoff(e) <= now and e["id"] not in done]
+    upcoming = [e for e in events if now < kickoff(e) <= now + WINDOW and e["id"] not in done]
+    n = _snapshot_events(con, snapshot_id, season, week, upcoming) if upcoming else 0
+    if missed:
+        games = ", ".join(f"{e['away_team']} at {e['home_team']}" for e in missed)
+        raise MissedGames(f"props not captured before kickoff ({games}); stored {n} players")
+    return n
+
+
+def _snapshot_events(con, snapshot_id: str, season: int, week: int, upcoming: list) -> int:
     names = players_by_name(con)
     rows, unmatched, remaining = [], [], None
     for e in upcoming:

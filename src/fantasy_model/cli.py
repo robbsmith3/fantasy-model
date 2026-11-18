@@ -111,6 +111,7 @@ def run_job(job: str, cfg: dict | None = None, con=None) -> bool:
 
     if job == "daily":
         step("players", sleeper.snapshot_players, con, snapshot_id)
+        step("props", odds.snapshot_props, con, snapshot_id, season, week)
 
     elif job == "pre_waiver":
         for lg in config.leagues(cfg, "sleeper"):

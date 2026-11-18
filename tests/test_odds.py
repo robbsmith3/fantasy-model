@@ -60,6 +60,47 @@ def test_anytime_td_devigs_against_no_or_assumes_a_margin():
     assert s["B"]["player_anytime_td"]["p_yes"] == pytest.approx(0.4 / 1.07)
 
 
+def _fake_api(monkeypatch, events, calls):
+    class R:
+        def __init__(self, body):
+            self.body, self.headers = body, {"x-requests-remaining": "400"}
+
+        def json(self):
+            return self.body
+
+    def fake_get(path, **params):
+        calls.append(path)
+        if path == "/events":
+            return R(events)
+        return R(_event([_book({"player_pass_yds": ou("Patrick Mahomes", 270.5, -115, -105)})]))
+
+    monkeypatch.setattr(odds, "_get", fake_get)
+    monkeypatch.setenv("ODDS_API_KEY", "secret-key")
+
+
+def _game(eid, kickoff):
+    return {**_event([]), "id": eid, "commence_time": kickoff, "home_team": "Kansas City Chiefs",
+            "away_team": "Denver Broncos"}  # fmt: skip
+
+
+def test_each_game_is_captured_once_and_a_missed_kickoff_is_an_error(monkeypatch, tmp_path):
+    con = db.connect(tmp_path / "t.duckdb")
+    calls = []
+    events = [_game("thu", "2026-11-12T01:15:00Z"), _game("sun", "2026-11-15T18:00:00Z")]
+    _fake_api(monkeypatch, events, calls)
+    wed = datetime(2026, 11, 11, 15, 0, tzinfo=UTC)  # Wednesday's daily: only Thursday is near
+    odds.snapshot_props(con, "wed", 2026, 10, now=wed)
+    assert calls == ["/events", "/events/thu/odds"]
+    calls.clear()
+    thu_late = datetime(2026, 11, 12, 2, 50, tzinfo=UTC)  # after kickoff, but already captured
+    odds.snapshot_props(con, "thu", 2026, 10, now=thu_late)
+    assert calls == ["/events"]
+    calls.clear()
+    sun_late = datetime(2026, 11, 15, 18, 30, tzinfo=UTC)  # Sunday's game started, never captured
+    with pytest.raises(odds.MissedGames, match="Denver Broncos at Kansas City Chiefs"):
+        odds.snapshot_props(con, "sun", 2026, 10, now=sun_late)
+
+
 def test_snapshot_props_maps_players_skips_started_games_and_stores_no_key(monkeypatch, tmp_path):
     con = db.connect(tmp_path / "t.duckdb")
     con.execute(
@@ -69,7 +110,6 @@ def test_snapshot_props_maps_players_skips_started_games_and_stores_no_key(monke
     now = datetime(2026, 11, 8, 17, 30, tzinfo=UTC)
     events = [
         {"id": "e1", "commence_time": "2026-11-08T18:00:00Z", **_event([])},
-        {"id": "e0", "commence_time": "2026-11-08T17:00:00Z", **_event([])},  # already started
     ]
     calls = []
 

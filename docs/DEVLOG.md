@@ -303,6 +303,15 @@ Four-source average MAE, 2026 week 8 only, difference from baseline (189 players
   and records the failure, saving it to `data/failed_runs.jsonl` for the site's alert banner and the
   next run if the database is the thing it can't reach.
 
+### Props: capture every game
+- Thursday 2026-11-05's pre_kickoff ran at 8:52pm CT (PC off at 6:30), after the 7:16pm kickoff, so
+  it stored 0 and still reported success; Sunday's ran after the 8:30am London game. Neither can be
+  recovered (no free history).
+- Now `daily` also snapshots games starting within 36 hours, and each game is captured once, so
+  Wednesday's daily gets Thursday's game, Saturday's gets Sunday's and pre_kickoff the rest, for
+  the same ~96 credits a week. Captured earlier, lines can be up to a day staler. A listed game that
+  started without being captured raises MissedGames: the run reports an error and an alert.
+
 ## Open questions
 - Naming auction winners is still the weakest piece (15%).
 - Injury discounts (`fit.INJURY_AVAIL`) are hand-set.

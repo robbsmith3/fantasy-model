@@ -92,7 +92,7 @@ powershell -ExecutionPolicy Bypass -File \\wsl.localhost\Ubuntu-24.04\home\<you>
 
 | Job | When (local) | What it saves |
 |---|---|---|
-| `daily` | 9am Mon–Wed, Fri–Sat | injury status, practice reports, depth charts |
+| `daily` | 9am Mon–Wed, Fri–Sat | injury status, practice reports, depth charts, betting props for games in the next 36h |
 | `pre_waiver` | Tue 8pm | rosters, FAAB, scores, projections (Sleeper, ESPN, FantasyPros, our model) |
 | `post_waiver` | Wed 9am | winning *and losing* bids, then the weekly report card |
 | `pre_kickoff` | Thu 6:30pm, Sun 11:30am | final projections, player status, betting props |
@@ -180,7 +180,8 @@ backtest only uses data from before the week it predicts.
   lines, injury reports, expected fantasy points (ffopportunity), and FantasyPros consensus
   rankings and projections.
 - **[The Odds API](https://the-odds-api.com/):** NFL player props (yards, receptions, TDs),
-  saved before kickoff; free plan. Being collected for testing, not yet in the consensus. Needs a
+  saved before kickoff by `daily` and `pre_kickoff`, each game once; a game missed by kickoff
+  raises an alert. Free plan. Being collected for testing, not yet in the consensus. Needs a
   key in `~/.config/fantasy-model/odds-api.key` (or `$ODDS_API_KEY`).
 - **Yahoo Fantasy:** awaiting API access. Screens showing Yahoo data will carry "Fantasy data
   provided by Yahoo Fantasy" as Yahoo requires.
